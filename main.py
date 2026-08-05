@@ -42,14 +42,58 @@ PRICE = "100000"
 
 def calculate_quant_signals(symbol: str):
     # Mapeo de sÃ­mbolos crypto a palabras clave de Guardian
-    symbol_mapping = {
-        "BTC": "Bitcoin",
-        "ETH": "Ethereum",
-        "ALGO": "Algorand",
-        "SOL": "Solana",
-        "XRP": "Ripple",
-        "ADA": "Cardano"
-    }
+symbol_mapping = {
+    "BTC": "Bitcoin",
+    "ETH": "Ethereum",
+    "USDT": "Tether",
+    "BNB": "Binance Coin",
+    "XRP": "Ripple",
+    "SOL": "Solana",
+    "STETH": "Lido Staked Ethereum",
+    "ADA": "Cardano",
+    "DOGE": "Dogecoin",
+    "DOT": "Polkadot",
+    "MATIC": "Polygon",
+    "LTC": "Litecoin",
+    "BCH": "Bitcoin Cash",
+    "LINK": "Chainlink",
+    "UNI": "Uniswap",
+    "WBTC": "Wrapped Bitcoin",
+    "ATOM": "Cosmos",
+    "XMR": "Monero",
+    "XLM": "Stellar",
+    "AVAX": "Avalanche",
+    "ARB": "Arbitrum",
+    "OP": "Optimism",
+    "FIL": "Filecoin",
+    "GRT": "The Graph",
+    "APT": "Aptos",
+    "HBAR": "Hedera Hashgraph",
+    "FTM": "Fantom",
+    "ALGO": "Algorand",
+    "CRO": "Crypto.com Coin",
+    "MKR": "Maker",
+    "AAVE": "Aave",
+    "CRV": "Curve",
+    "ICP": "Internet Computer",
+    "QNT": "Quant",
+    "SUI": "Sui",
+    "LDO": "Lido DAO",
+    "COMP": "Compound",
+    "IMX": "Immutable X",
+    "CVX": "Convex Finance",
+    "KAS": "Kaspa",
+    "ZEC": "Zcash",
+    "DASH": "Dash",
+    "AXS": "Axie Infinity",
+    "SAND": "The Sandbox",
+    "MANA": "Decentraland",
+    "YFI": "Yearn Finance",
+    "CAKE": "PancakeSwap",
+    "BAL": "Balancer",
+    "SNX": "Synthetix",
+}
+
     
     query = symbol_mapping.get(symbol.upper(), symbol)
     guardian_api_key = "51d745b7-2103-4db2-b5df-6ec266b32340"  # Reemplaza con tu API key
