@@ -52,7 +52,7 @@ def calculate_quant_signals(symbol: str):
     }
     
     query = symbol_mapping.get(symbol.upper(), symbol)
-    guardian_api_key = "YOUR_GUARDIAN_API_KEY"  # Reemplaza con tu API key
+    guardian_api_key = "51d745b7-2103-4db2-b5df-6ec266b32340"  # Reemplaza con tu API key
     
     url = f"https://content.guardianapis.com/search?q={query}&api-key={guardian_api_key}&show-fields=headline,bodyText,webPublicationDate&page-size=10"
     
