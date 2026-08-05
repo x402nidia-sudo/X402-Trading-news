@@ -35,7 +35,7 @@ async def x402_manifest():
     file_path = os.path.join(os.path.dirname(__file__), "x402.json")
     return FileResponse(file_path, media_type="application/json")
 
-PAYTO_ADDRESS = "LBVLS7TP4H5QNPXO7UOBOFI4IEJ33W6FTYFJTCZCMRE2B4AEG5A6SFDL3U"
+PAYTO_ADDRESS = "EH5BHWISPB7MEIITJIWF2VB3YFN2RZLJMWBRV6CBJV76FBAEAALL6XKSQE"
 USDC_ASA_ID = "31566704"
 ALGORAND_MAINNET_CAIP2 = "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8="
 PRICE = "100000"
