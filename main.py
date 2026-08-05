@@ -40,81 +40,103 @@ USDC_ASA_ID = "31566704"
 ALGORAND_MAINNET_CAIP2 = "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8="
 PRICE = "100000"
 
-def calculate_quant_signals(symbol: str):
-    # Mapeo de sÃ­mbolos crypto a palabras clave de Guardian
-symbol_mapping = {
-    "BTC": "Bitcoin",
-    "ETH": "Ethereum",
-    "USDT": "Tether",
-    "BNB": "Binance Coin",
-    "XRP": "Ripple",
-    "SOL": "Solana",
-    "STETH": "Lido Staked Ethereum",
-    "ADA": "Cardano",
-    "DOGE": "Dogecoin",
-    "DOT": "Polkadot",
-    "MATIC": "Polygon",
-    "LTC": "Litecoin",
-    "BCH": "Bitcoin Cash",
-    "LINK": "Chainlink",
-    "UNI": "Uniswap",
-    "WBTC": "Wrapped Bitcoin",
-    "ATOM": "Cosmos",
-    "XMR": "Monero",
-    "XLM": "Stellar",
-    "AVAX": "Avalanche",
-    "ARB": "Arbitrum",
-    "OP": "Optimism",
-    "FIL": "Filecoin",
-    "GRT": "The Graph",
-    "APT": "Aptos",
-    "HBAR": "Hedera Hashgraph",
-    "FTM": "Fantom",
-    "ALGO": "Algorand",
-    "CRO": "Crypto.com Coin",
-    "MKR": "Maker",
-    "AAVE": "Aave",
-    "CRV": "Curve",
-    "ICP": "Internet Computer",
-    "QNT": "Quant",
-    "SUI": "Sui",
-    "LDO": "Lido DAO",
-    "COMP": "Compound",
-    "IMX": "Immutable X",
-    "CVX": "Convex Finance",
-    "KAS": "Kaspa",
-    "ZEC": "Zcash",
-    "DASH": "Dash",
-    "AXS": "Axie Infinity",
-    "SAND": "The Sandbox",
-    "MANA": "Decentraland",
-    "YFI": "Yearn Finance",
-    "CAKE": "PancakeSwap",
-    "BAL": "Balancer",
-    "SNX": "Synthetix",
-}
+import urllib.parse
 
+def calculate_quant_signals(symbol: str):
+    # Mapeo COMPLETO de símbolos crypto a palabras clave de Guardian
+    symbol_mapping = {
+        "BTC": "Bitcoin",
+        "ETH": "Ethereum",
+        "USDT": "Tether USDT",
+        "BNB": "Binance Coin",
+        "XRP": "Ripple XRP",
+        "SOL": "Solana blockchain",
+        "STETH": "Ethereum staking",
+        "ADA": "Cardano",
+        "DOGE": "Dogecoin",
+        "DOT": "Polkadot",
+        "MATIC": "Polygon Matic",
+        "LTC": "Litecoin",
+        "BCH": "Bitcoin Cash",
+        "LINK": "Chainlink",
+        "UNI": "Uniswap",
+        "WBTC": "Wrapped Bitcoin",
+        "ATOM": "Cosmos ATOM",
+        "XMR": "Monero",
+        "XLM": "Stellar Lumens",
+        "AVAX": "Avalanche",
+        "ARB": "Arbitrum",
+        "OP": "Optimism",
+        "FIL": "Filecoin",
+        "GRT": "The Graph",
+        "APT": "Aptos",
+        "HBAR": "Hedera",
+        "FTM": "Fantom",
+        "ALGO": "Algorand",
+        "CRO": "Crypto.com",
+        "MKR": "Maker MKR",
+        "AAVE": "Aave",
+        "CRV": "Curve",
+        "ICP": "Internet Computer",
+        "QNT": "Quant",
+        "SUI": "Sui blockchain",
+        "LDO": "Lido",
+        "COMP": "Compound",
+        "IMX": "Immutable X",
+        "CVX": "Convex",
+        "KAS": "Kaspa",
+        "ZEC": "Zcash",
+        "DASH": "Dash coin",
+        "AXS": "Axie Infinity",
+        "SAND": "The Sandbox",
+        "MANA": "Decentraland",
+        "YFI": "Yearn Finance",
+        "CAKE": "PancakeSwap",
+        "BAL": "Balancer",
+        "SNX": "Synthetix",
+    }
+    
+    # Obtener la API key desde variable de entorno
+    guardian_api_key = os.getenv("GUARDIAN_API_KEY")
+    if not guardian_api_key:
+        return {"error": "GUARDIAN_API_KEY no configurada"}
     
     query = symbol_mapping.get(symbol.upper(), symbol)
-    guardian_api_key = "51d745b7-2103-4db2-b5df-6ec266b32340"  # Reemplaza con tu API key
     
-    url = f"https://content.guardianapis.com/search?q={query}&api-key={guardian_api_key}&show-fields=headline,bodyText,webPublicationDate&page-size=10"
+    # Construir URL con encoding correcto
+    url = f"https://content.guardianapis.com/search?q={urllib.parse.quote(query)}&api-key={guardian_api_key}&show-fields=headline,bodyText,webPublicationDate&page-size=10"
     
     try:
-        res = requests.get(url)
+        res = requests.get(url, timeout=10)
+        
+        if res.status_code == 401:
+            return {"error": "GUARDIAN_API_KEY inválida o expirada"}
         
         if res.status_code != 200:
-            return {"error": f"No se encontraron artÃ­culos para {symbol}"}
+            return {"error": f"Guardian API error: {res.status_code}"}
         
         data = res.json()
         results = data.get("response", {}).get("results", [])
         
         if not results:
-            return {"error": "No articles found for query"}
+            return {
+                "error": f"No articles found for '{query}'",
+                "article_count": 0,
+                "recommendation": "N/A"
+            }
         
         article_count = len(results)
-        # En vez de cambio %, usa cantidad de artÃ­culos como seÃ±al
-        signal = "BUY" if article_count > 5 else ("SELL" if article_count < 2 else "HOLD")
+        
+        # Mejorar lógica de señal
+        if article_count >= 8:
+            signal = "BUY"
+        elif article_count >= 5:
+            signal = "HOLD"
+        elif article_count >= 2:
+            signal = "WAIT"
+        else:
+            signal = "SELL"
+        
         top_article = results[0].get("webTitle", "N/A")
         
         return {
@@ -122,11 +144,17 @@ symbol_mapping = {
             "article_count": article_count,
             "recommendation": signal,
             "top_article": top_article,
+            "query_used": query,
             "timestamp": int(time.time())
         }
     
+    except requests.exceptions.Timeout:
+        return {"error": "Guardian API timeout"}
+    except requests.exceptions.ConnectionError:
+        return {"error": "Cannot connect to Guardian API"}
     except Exception as e:
-        return {"error": f"Error al consultar Guardian API: {str(e)}"}
+        return {"error": f"Error: {str(e)}"}
+
 
 @app.get("/api/v1/market-signal/{symbol}")
 async def get_market_signal(request: Request, response: Response, symbol: str):
