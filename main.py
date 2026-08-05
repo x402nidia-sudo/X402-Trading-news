@@ -7,6 +7,10 @@ import os
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import FileResponse 
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # ← Esta línea carga el .env
 
 app = FastAPI(title="x402 Trading news Engine API")
 
