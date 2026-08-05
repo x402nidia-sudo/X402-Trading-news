@@ -97,7 +97,7 @@ def calculate_quant_signals(symbol: str):
     }
     
     # Obtener la API key desde variable de entorno
-    guardian_api_key = "51d745b7-2103-4db2-b5df-6ec266b32340"
+    guardian_api_key = os.getenv("GUARDIAN_API_KEY")
     if not guardian_api_key:
         return {"error": "GUARDIAN_API_KEY no configurada"}
     
