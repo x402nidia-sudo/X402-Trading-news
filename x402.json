@@ -1,0 +1,46 @@
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "https://github.com/x402nidia-sudo/X402-Trading-news",
+    "description": "Real-time Market News",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkkit8=",
+      "asset": "31566704",
+      "amount": "100000",
+      "payTo": "LBVLS7TP4H5QNPXO7UOBOFI4IEJ33W6FTYFJTCZCMRE2B4AEG5A6SFDL3U",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "decimals": 6,
+        "tag": "x402-global-challenge"
+      }
+    }
+  ],
+  "extensions": {
+    "bazaar": {
+      "info": {
+        "icon": "https://i.imgur.com/qEmbipv.jpeg",
+        "name": "Toni Trading Signals",
+        "displayName": "Toni Trading Signals",
+        "category": "crypto-trading",
+        "tags": ["trading", "signals", "market-analysis"],
+        "provider": "toni_t"
+      },
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Cryptocurrency News",
+            "examples": ["BTC", "ETH", "ALGO"]
+          }
+        },
+        "required": ["symbol"]
+      }
+    }
+  }
+}
