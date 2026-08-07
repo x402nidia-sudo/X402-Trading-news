@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
-load_dotenv()  # ← Esta línea carga el .env
+load_dotenv()
 
 app = FastAPI(title="x402 Trading news Engine API")
 
@@ -32,7 +32,6 @@ app.add_middleware(
     ]
 )
 
-# âœ… RUTA PARA AGENT CARD
 @app.get("/.well-known/x402.json")
 async def x402_manifest():
     """Serve the x402 discovery manifest"""
@@ -47,7 +46,6 @@ PRICE = "100000"
 import urllib.parse
 
 def calculate_quant_signals(symbol: str):
-    # Mapeo COMPLETO de símbolos crypto a palabras clave de Guardian
     symbol_mapping = {
         "BTC": "Bitcoin",
         "ETH": "Ethereum",
@@ -100,23 +98,60 @@ def calculate_quant_signals(symbol: str):
         "SNX": "Synthetix",
     }
     
-    # Obtener la API key desde variable de entorno
     guardian_api_key = os.getenv("GUARDIAN_API_KEY")
     if not guardian_api_key:
         return {"error": "GUARDIAN_API_KEY no configurada"}
     
     query = symbol_mapping.get(symbol.upper(), symbol)
-    
-    # Construir URL con encoding correcto
     url = f"https://content.guardianapis.com/search?q={urllib.parse.quote(query)}&api-key={guardian_api_key}&show-fields=headline,bodyText,webPublicationDate&page-size=10"
     
+    print("\n" + "="*70)
+    print("DEBUG: GUARDIAN API REQUEST")
+    print("="*70)
+    print(f"URL: {url}")
+    print(f"Symbol: {symbol}")
+    print(f"Query: {query}")
+    print(f"API Key (primeros 10 chars): {guardian_api_key[:10]}...")
+    print("="*70)
+    
     try:
+        print(f"[DEBUG] Enviando petición a Guardian...")
         res = requests.get(url, timeout=10)
         
+        print(f"[DEBUG] Status Code: {res.status_code}")
+        print(f"[DEBUG] Headers respuesta:")
+        for key, value in res.headers.items():
+            print(f"       {key}: {value}")
+        
+        print(f"[DEBUG] Response body (primeros 500 chars):")
+        print(f"       {res.text[:500]}")
+        print("="*70 + "\n")
+        
+        if res.status_code == 429:
+            print("[!] 429 - Too Many Requests")
+            print(f"    Rate-Limit-Remaining: {res.headers.get('X-RateLimit-Remaining', 'N/A')}")
+            print(f"    Retry-After: {res.headers.get('Retry-After', 'N/A')}")
+            return {
+                "error": f"Guardian API 429 - Rate Limited",
+                "rate_limit_remaining": res.headers.get('X-RateLimit-Remaining'),
+                "retry_after": res.headers.get('Retry-After')
+            }
+        
+        if res.status_code == 403:
+            print("[!] 403 - Forbidden")
+            print(f"    Response: {res.text}")
+            return {"error": "Guardian API 403 - Forbidden (posible IP bloqueada o API key inválida)"}
+        
         if res.status_code == 401:
+            print("[!] 401 - Unauthorized")
             return {"error": "GUARDIAN_API_KEY inválida o expirada"}
         
+        if res.status_code == 400:
+            print("[!] 400 - Bad Request")
+            return {"error": f"Guardian API 400 - Bad Request: {res.text}"}
+        
         if res.status_code != 200:
+            print(f"[!] Error HTTP {res.status_code}")
             return {"error": f"Guardian API error: {res.status_code}"}
         
         data = res.json()
@@ -131,7 +166,6 @@ def calculate_quant_signals(symbol: str):
         
         article_count = len(results)
         
-        # Mejorar lógica de señal
         if article_count >= 8:
             signal = "BUY"
         elif article_count >= 5:
@@ -153,11 +187,43 @@ def calculate_quant_signals(symbol: str):
         }
     
     except requests.exceptions.Timeout:
-        return {"error": "Guardian API timeout"}
-    except requests.exceptions.ConnectionError:
-        return {"error": "Cannot connect to Guardian API"}
+        print("[!] TIMEOUT - Guardian API no responde")
+        return {"error": "Guardian API timeout (>10s)"}
+    except requests.exceptions.ConnectionError as e:
+        print(f"[!] CONNECTION ERROR - {str(e)}")
+        return {"error": f"Cannot connect to Guardian API: {str(e)}"}
     except Exception as e:
+        print(f"[!] EXCEPTION - {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {"error": f"Error: {str(e)}"}
+
+
+@app.get("/api/v1/debug-guardian/{symbol}")
+async def debug_guardian(symbol: str):
+    """Ruta para debuggear Guardian directamente (SIN pago requerido)"""
+    print(f"\n[DEBUG] Testeo directo de Guardian para: {symbol}")
+    
+    result = calculate_quant_signals(symbol)
+    
+    return {
+        "symbol": symbol,
+        "debug_result": result,
+        "timestamp": int(time.time())
+    }
+
+
+@app.get("/api/v1/check-ip")
+async def check_ip(request: Request):
+    """Ruta para verificar tu IP actual"""
+    client_ip = request.client.host if request.client else "unknown"
+    forwarded_for = request.headers.get("x-forwarded-for", "none")
+    
+    return {
+        "client_ip": client_ip,
+        "x-forwarded-for": forwarded_for,
+        "all_headers": dict(request.headers)
+    }
 
 
 @app.get("/api/v1/market-signal/{symbol}")
@@ -188,7 +254,7 @@ async def get_market_signal(request: Request, response: Response, symbol: str):
     }
 
     if not auth_header:
-        print("-> PeticiÃ³n sin pago: Enviando 402 Challenge con Bazaar Discovery")
+        print("-> Petición sin pago: Enviando 402 Challenge con Bazaar Discovery")
         
         bazaar_extension = {
             "info": {
@@ -258,35 +324,35 @@ async def get_market_signal(request: Request, response: Response, symbol: str):
         facilitator_res = requests.post(verify_url, json=facilitator_payload)
         
         if facilitator_res.status_code != 200:
-            raise HTTPException(status_code=502, detail="Error de comunicaciÃ³n con GoPlausible")
+            raise HTTPException(status_code=502, detail="Error de comunicación con GoPlausible")
             
         verify_result = facilitator_res.json()
         
         if not verify_result.get("isValid"):
-            print(f"-> âŒ VERIFICACIÃ“N FALLIDA: {verify_result.get('invalidReason')}")
-            raise HTTPException(status_code=403, detail=f"Pago invÃ¡lido: {verify_result.get('invalidReason')}")
+            print(f"-> VERIFICACIÓN FALLIDA: {verify_result.get('invalidReason')}")
+            raise HTTPException(status_code=403, detail=f"Pago inválido: {verify_result.get('invalidReason')}")
 
-        print("-> âœ… VERIFICACIÃ“N OK. Procediendo a hacer SETTLE...")
+        print("-> VERIFICACIÓN OK. Procediendo a hacer SETTLE...")
         
         settle_url = "https://facilitator.goplausible.xyz/settle"
         settle_res = requests.post(settle_url, json=facilitator_payload)
         
         if settle_res.status_code == 200:
-            print(f"-> âœ… SETTLE COMPLETADO")
+            print(f"-> SETTLE COMPLETADO")
 
         data = calculate_quant_signals(symbol)
         
         return {
             "symbol": symbol,
             "status": "success",
-            "message": "TransacciÃ³n liquidada e indexada en el x402 Global Challenge.",
+            "message": "Transacción liquidada e indexada en el x402 Global Challenge.",
             "data": data
         }
         
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
-        print("ðŸ’¥ ERROR INTERNO CRÃTICO DETECTADO:")
+        print("ERROR INTERNO CRÍTICO DETECTADO:")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
@@ -297,4 +363,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
