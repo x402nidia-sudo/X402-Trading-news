@@ -1,0 +1,29 @@
+Trading News Agent 4 — English release validation — 2026-09-22
+
+Python: 43 tests passed after localization (2.23 seconds).
+JavaScript:
+✔ Pera result is the exact authorized payer transaction (25.153716ms)
+✔ rejects changed amount (9.951839ms)
+✔ rejects changed asset (7.087916ms)
+✔ rejects changed payTo (12.111031ms)
+✔ rejects changed network (4.794331ms)
+✔ rejects changed resource (8.689127ms)
+✔ rejects changed budget (5.004488ms)
+✔ rejects changed expired (9.998249ms)
+✔ rejects changed payer (12.697489ms)
+✔ rejects changed indexes (9.053055ms)
+✔ rekeying is refused even with rewritten IDs (10.70251ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 276.303411
+
+All payment tests use disposable keys and simulated providers/settlement. No real funds were spent.
+The Python run emitted SDK/test-client deprecation warnings; no failures.
+Render Blueprint: validated against the public schema.
+Real Pera/Mainnet purchase: pending. Native Windows installation: pending.
+Video: 100 seconds, English slides and English embedded subtitles, no narration or real transfers.

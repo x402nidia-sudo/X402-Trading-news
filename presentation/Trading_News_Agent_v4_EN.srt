@@ -1,0 +1,47 @@
+1
+00:00:00,000 --> 00:00:06,900
+Trading News selects relevant crypto news with explainable ranking and pay-per-use USDC payments on Algorand.
+
+2
+00:00:07,000 --> 00:00:14,900
+Extract the ZIP and open INSTALL.bat on Windows or install.sh on Linux. The installer adds the dependencies and writes config.txt.
+
+3
+00:00:15,000 --> 00:00:23,900
+The installer checks the service, connects the wallet, asks for a budget and verifies the balance. Setup cannot finish while required information is missing.
+
+4
+00:00:24,000 --> 00:00:33,900
+A local browser window connects Pera. If your wallet needs preparation for USDC, the installer requests approval and displays the reserve and fee before signing.
+
+5
+00:00:34,000 --> 00:00:41,900
+Open START.bat or start.sh. The agent lists the supported symbols and asks which asset you want to query, such as ETH.
+
+6
+00:00:42,000 --> 00:00:50,900
+The first purchase obtains the feed. The second selects a story. Both are project service charges, not a fixed ten-cent Algorand or contest fee.
+
+7
+00:00:51,000 --> 00:00:59,900
+The service filters by asset, groups duplicates and reduces the priority of speculation. It returns the highest-ranked story among the available results and explains its choice.
+
+8
+00:01:00,000 --> 00:01:07,900
+The response includes a headline, link, available timestamp, reasons and alternatives. GDELT detection is not presented as a verified publication date.
+
+9
+00:01:08,000 --> 00:01:16,900
+Another agent can list symbols and request a query with --json --pay, or import get_news. Unattended mode uses a dedicated local wallet and spending limits.
+
+10
+00:01:17,000 --> 00:01:24,900
+If a response is lost, --resume recovers the original purchase. If valid fresh news is missing at preflight, the agent does not request a signature or charge.
+
+11
+00:01:25,000 --> 00:01:32,900
+The package includes local tests of both payments and their recovery. The new backend still needs deployment and validation of a real purchase from Pera.
+
+12
+00:01:33,000 --> 00:01:39,900
+Trading News is a Python agent for asset-specific news with explainable selection, pay-per-use payments and guided setup.

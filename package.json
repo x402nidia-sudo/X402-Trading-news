@@ -1,18 +1,1 @@
-{
-  "name": "alpha_sync_api",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "@x402/avm": "^2.19.0",
-    "@x402/fetch": "^2.19.0",
-    "algosdk": "^3.6.0"
-  }
-}
+{"name":"x402-trading-news","version":"4.0.0","private":true,"type":"module","scripts":{"build":"esbuild wallet/source.js --bundle --format=esm --platform=browser --target=es2022 --minify --legal-comments=eof --outfile=wallet/wallet.js","test:wallet":"node --test tests/wallet.test.mjs"},"dependencies":{"@perawallet/connect":"1.6.1","algosdk":"3.5.2"},"devDependencies":{"esbuild":"0.28.2"}}

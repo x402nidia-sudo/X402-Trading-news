@@ -1,0 +1,10 @@
+# The installer completes this file. No manual editing is needed.
+[tradingnews]
+api_url = https://x402-trading-news.onrender.com
+network = mainnet
+mode = pera
+wallet_address =
+merchant_address = EH5BHWISPB7MEIITJIWF2VB3YFN2RZLJMWBRV6CBJV76FBAEAALL6XKSQE
+max_per_query_usdc = 0.20
+max_per_day_usdc = 1.00
+configured = false

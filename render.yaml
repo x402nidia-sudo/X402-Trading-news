@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: x402-trading-news
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server.main:production_app --factory --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeployTrigger: 'off'
+    disk:
+      name: trading-news-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PAYMENTS_ENABLED
+        value: 'true'
+      - key: DEMO_MODE
+        value: 'false'
+      - key: PUBLIC_BASE_URL
+        value: https://x402-trading-news.onrender.com
+      - key: ALGORAND_NETWORK
+        value: mainnet
+      - key: PAYTO_ADDRESS
+        sync: false
+      - key: SOURCE_PRICE_USDC
+        value: '0.10'
+      - key: SELECTION_PRICE_USDC
+        value: '0.10'
+      - key: DATABASE_PATH
+        value: /var/data/news.sqlite3
+      - key: GDELT_ENABLED
+        value: 'true'
+      - key: ENABLE_LEGACY_PROVIDERS
+        value: 'false'
+      - key: AI_RERANK
+        value: 'false'
