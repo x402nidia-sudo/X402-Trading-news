@@ -15,7 +15,7 @@ The catalog retains the **49 symbols from the original project files**. The auth
 
 ## Deploy to the existing Render service
 
-Review and merge the English agent branch, then update **the existing `x402-trading-news` service** to keep its URL and registered resources. Creating a new Blueprint service does not automatically replace the existing service.
+The English agent is merged into `main`. Update **the existing `x402-trading-news` service** from that branch to keep its URL and registered resources. Creating a new Blueprint service does not automatically replace the existing service.
 
 Build command:
 

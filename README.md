@@ -8,10 +8,10 @@ Choose a crypto asset and receive the story the service ranks as most relevant, 
 
 ## Quick start
 
-Download and extract the complete project folder. While v4 is under review, clone this branch:
+Download and extract the complete project folder, or clone the main branch:
 
 ```bash
-git clone --branch codex/trading-news-agent-v4-english https://github.com/x402nidia-sudo/X402-Trading-news.git
+git clone https://github.com/x402nidia-sudo/X402-Trading-news.git
 cd X402-Trading-news
 ```
 

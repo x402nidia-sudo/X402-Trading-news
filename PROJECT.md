@@ -14,6 +14,6 @@ GDELT, shared caching and explainable rules avoid mandatory paid news and LLM su
 
 ## Submission status
 
-The package implements these flows and has passed local tests using simulated providers and settlement. Deployment of the new public API, a real Pera purchase and verification of the contest dashboard's registered catalog remain pending. Do not describe those steps as completed until verified. The presentation video is a visual explainer, with illustrative examples and no real transfers.
+The package implements these flows, is published on the repository's main branch and has passed local tests and GitHub Actions using simulated providers and settlement. Deployment of the new public API, a real Pera purchase and verification of the contest dashboard's registered catalog remain pending. Do not describe those steps as completed until verified. The presentation video is a visual explainer, with illustrative examples and no real transfers.
 
 Owner-provided contest contact: x402nidia@gmail.com.

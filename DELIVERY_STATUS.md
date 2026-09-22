@@ -19,11 +19,11 @@ The Render Blueprint has been checked against Render's public schema. The remote
 
 ## Publication and remaining work
 
-The English source is prepared in the repository's `codex/trading-news-agent-v4-english` branch for review. Publishing this branch does not deploy the backend or establish that a production purchase works.
+The English source was merged into `main` on 22 September 2026 through [pull request #1](https://github.com/x402nidia-sudo/X402-Trading-news/pull/1), merge commit `cf898bdb45ee9c74d82f40f10f4e45b7805811ee`. Both GitHub Actions runs for the reviewed code passed. Merging source does not establish that the new backend is deployed or that a production purchase works.
 
 Before a production launch:
 
-1. Review and merge the branch, then deploy the new API to the existing Render service.
+1. Deploy the merged API to the existing Render service using the configuration in `DEPLOYMENT.md`.
 2. Confirm the Render workspace, receiving wallet ownership and persistent disk configuration. No additional paid infrastructure has been activated.
 3. Complete native Windows/Pera setup and one real 0.20 USDC query with both receipts, then verify recovery.
 4. Check the 49-symbol project catalog against the authenticated contest resource list.
