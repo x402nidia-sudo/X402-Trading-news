@@ -21,7 +21,7 @@ def flag(name, default=False):
 def atomic_usdc(value):
     try:
         amount = Decimal(str(value)) * 1_000_000
-        if not amount.is_finite() or amount <= 0 or amount != amount.to_integral_value():
+        if not amount.is_finite() or amount <= 0 or amount > 2**53 - 1 or amount != amount.to_integral_value():
             raise ValueError()
         return str(int(amount))
     except (InvalidOperation, ValueError):
@@ -43,10 +43,10 @@ class Settings:
     max_age_hours: int = 24
     language: str = "en"
     provider_keys: dict = field(default_factory=dict)
-    provider_budgets: dict = field(default_factory=lambda: {"guardian": 450, "newsapi": 90, "gnews": 90})
+    provider_budgets: dict = field(default_factory=lambda: {"newsapi": 90, "gnews": 90})
     ai_enabled: bool = False
     ai_key: str = ""
-    ai_model: str = ""
+    ai_model: str = "gpt-4.1-mini-2025-04-14"
     ai_daily_limit: int = 50
     request_limit: int = 60
 
@@ -65,7 +65,7 @@ class Settings:
     def validate(self):
         if self.network_name not in NETWORKS:
             raise ValueError("ALGORAND_NETWORK must be mainnet or testnet")
-        self.amount
+        self.price_usdc = format(Decimal(self.amount) / 1_000_000, "f")
         if self.language not in {"en", "es", "all"}:
             raise ValueError("NEWS_LANGUAGE must be en, es or all")
         if self.cache_seconds < 10 or not 1 <= self.max_age_hours <= 168:
@@ -100,7 +100,8 @@ class Settings:
             demo=flag("DEMO_MODE", False), payments=flag("PAYMENTS_ENABLED"),
             public_url=os.getenv("PUBLIC_BASE_URL", "https://x402-trading-news.onrender.com").rstrip("/"),
             network_name=os.getenv("ALGORAND_NETWORK", "mainnet"),
-            pay_to=os.getenv("PAYTO_ADDRESS") or os.getenv("PAY_TO_ALGORAND_ADDRESS") or os.getenv("PAY_TO_ADDRESS", ""), price_usdc="0.199",
+            pay_to=os.getenv("PAYTO_ADDRESS") or os.getenv("PAY_TO_ALGORAND_ADDRESS") or os.getenv("PAY_TO_ADDRESS", ""),
+            price_usdc=os.getenv("PRICE_USDC", "0.199").strip(),
             facilitator=os.getenv("FACILITATOR_URL", "https://facilitator.goplausible.xyz").rstrip("/"),
             admin_token=os.getenv("ADMIN_TOKEN", ""),
             db_path=os.getenv("DATABASE_PATH", str(ROOT / "data" / "news.sqlite3")),
@@ -108,12 +109,12 @@ class Settings:
             max_age_hours=int(os.getenv("MAX_AGE_HOURS", "24")),
             language=os.getenv("NEWS_LANGUAGE", "en"),
             provider_keys={p: os.getenv(k, "") for p, k in {
-                "guardian": "GUARDIAN_API_KEY", "newsapi": "NEWSAPI_KEY", "gnews": "GNEWS_API_KEY"
+                "newsapi": "NEWSAPI_KEY", "gnews": "GNEWS_API_KEY"
             }.items()},
             provider_budgets={p: int(os.getenv(p.upper() + "_DAILY_LIMIT", str(n))) for p, n in
-                              {"guardian": 450, "newsapi": 90, "gnews": 90}.items()},
+                              {"newsapi": 90, "gnews": 90}.items()},
             ai_enabled=flag("AI_RERANK"), ai_key=os.getenv("OPENAI_API_KEY", ""),
-            ai_model=os.getenv("OPENAI_MODEL", ""), ai_daily_limit=int(os.getenv("AI_DAILY_LIMIT", "50")),
+            ai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini-2025-04-14"), ai_daily_limit=int(os.getenv("AI_DAILY_LIMIT", "50")),
             request_limit=int(os.getenv("REQUESTS_PER_MINUTE", "60")),
         )
         result.validate()

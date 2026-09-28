@@ -19,7 +19,7 @@ def retry_delay(value):
 class Providers:
     def __init__(self, settings, store, http):
         self.settings, self.store, self.http = settings, store, http
-        self.locks = {p: asyncio.Lock() for p in ("guardian", "newsapi", "gnews")}
+        self.locks = {p: asyncio.Lock() for p in ("newsapi", "gnews")}
         self.last_request = {p: 0. for p in self.locks}
 
     async def fetch(self, provider, asset):
@@ -27,8 +27,6 @@ class Providers:
         if not key:
             return [], {"provider": provider, "status": "not_configured", "count": 0}
         status = {"provider": provider, "status": "ok", "count": 0}
-        if provider == "guardian" and self.settings.language == "es":
-            return [], dict(status, status="language_not_supported")
         async with self.locks[provider]:
             if self.store.cooldown(provider):
                 return [], dict(status, status="cooldown")
@@ -39,11 +37,7 @@ class Providers:
             start = datetime.now(timezone.utc) - timedelta(hours=self.settings.max_age_hours)
             query = query_for(asset)
             params, headers = {}, {}
-            if provider == "guardian":
-                url = "https://content.guardianapis.com/search"
-                params = {"q": query, "api-key": key, "page-size": 30, "order-by": "newest",
-                          "from-date": start.date().isoformat(), "show-fields": "trailText"}
-            elif provider == "newsapi":
+            if provider == "newsapi":
                 url = "https://newsapi.org/v2/everything"
                 params = {"q": query, "pageSize": 30, "sortBy": "publishedAt", "from": start.isoformat()}
                 headers = {"X-Api-Key": key}
@@ -51,7 +45,7 @@ class Providers:
                 url = "https://gnews.io/api/v4/search"
                 params = {"q": query[:200], "apikey": key, "max": 10,
                           "sortby": "publishedAt", "from": start.isoformat()}
-            if provider != "guardian" and self.settings.language != "all":
+            if self.settings.language != "all":
                 params["language" if provider == "newsapi" else "lang"] = self.settings.language
             try:
                 res = await self.http.get(url, params=params, headers=headers, timeout=12)
@@ -64,20 +58,12 @@ class Providers:
                         self.store.cooldown(provider, 900)
                     return [], dict(status, status="http_error", http_status=res.status_code)
                 data = res.json()
-                if provider == "guardian":
-                    if data.get("response", {}).get("status") != "ok":
-                        return [], dict(status, status="invalid_response")
-                    rows = data["response"].get("results", [])
-                    items = [{"title": x.get("webTitle"), "summary": x.get("fields", {}).get("trailText"),
-                              "url": x.get("webUrl"), "source": "The Guardian", "provider": provider,
-                              "published_at": x.get("webPublicationDate")} for x in rows if isinstance(x, dict)]
-                else:
-                    if (provider == "newsapi" and data.get("status") != "ok") or "articles" not in data:
-                        return [], dict(status, status="invalid_response")
-                    items = [{"title": x.get("title"), "summary": x.get("description"),
-                              "url": x.get("url"), "source": (x.get("source") or {}).get("name", provider),
-                              "provider": provider, "published_at": x.get("publishedAt")}
-                             for x in data["articles"] if isinstance(x, dict)]
+                if (provider == "newsapi" and data.get("status") != "ok") or "articles" not in data:
+                    return [], dict(status, status="invalid_response")
+                items = [{"title": x.get("title"), "summary": x.get("description"),
+                          "url": x.get("url"), "source": (x.get("source") or {}).get("name", provider),
+                          "provider": provider, "published_at": x.get("publishedAt")}
+                         for x in data["articles"] if isinstance(x, dict)]
                 return items, dict(status, count=len(items))
             except httpx.TimeoutException:
                 return [], dict(status, status="timeout")
