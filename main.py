@@ -6,20 +6,25 @@ from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
 import os
+import json
+import re
+from datetime import datetime, timezone
 import time
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from news.catalog import ASSETS, get_asset
 from news.config import Settings
-from news.payments import PaymentGateway
+from news.payments import PaymentGateway, decode_payment
 from news.providers import Providers
 from news.service import NewsService, NoProviders
 from news.storage import Store
 from news.checkout import Checkout
 from news.alerts import Alerts
+from news.insights import html_page, CSP
+from news.ranking import parse_date
 
 
 class CheckoutRequest(BaseModel):
@@ -52,7 +57,7 @@ def create_app(settings=None, transport=None):
     async def lifespan(app):
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, timeout=15,
                                      limits=httpx.Limits(max_connections=12),
-                                     headers={"User-Agent": "TradingNews/5.3"}) as http:
+                                     headers={"User-Agent": "TradingNews/5.4"}) as http:
             store = Store(cfg.db_path)
             app.state.store = store
             app.state.news = NewsService(cfg, store, Providers(cfg, store, http), http)
@@ -72,14 +77,14 @@ def create_app(settings=None, transport=None):
                         with suppress(asyncio.CancelledError):
                             await worker
 
-    app = FastAPI(title="Trading News · Agent API", version="5.3.0", lifespan=lifespan,
-                  description=f"One asset report for {cfg.price_usdc} USDC via x402 v2 on Algorand. Use /api/v1/market-signal/{{symbol}}. Today's news ordered by explainable rules: asset relevance, recency, source priority, event and coverage. Includes scores, source links and dates. No OpenAI dependency or BUY/SELL/HOLD recommendation. Report days use UTC.")
+    app = FastAPI(title="Trading News · Agent API", version="5.4.0", lifespan=lifespan,
+                  description=f"One asset report for {cfg.price_usdc} USDC via x402 v2 on Algorand. Use /api/v1/market-signal/{{symbol}}. Today's news ordered by explainable rules: asset relevance, recency, source priority, event and coverage. Includes scores, source links and dates. Includes indicative per-story BUY/SELL/HOLD impact signals based on explicit rules, without OpenAI. Free history excludes today. Report days use UTC.")
     app.state.settings = cfg
     rate = OrderedDict()
 
     @app.middleware("http")
     async def headers(request, call_next):
-        if request.url.path.startswith("/api/") and request.method != "OPTIONS":
+        if request.url.path.startswith(("/api/", "/news/")) and request.method != "OPTIONS":
             key = request.client.host if request.client else "unknown"
             now = time.monotonic()
             start, count = rate.get(key, (now, 0))
@@ -118,7 +123,7 @@ def create_app(settings=None, transport=None):
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "5.3.0", "payments_enabled": cfg.payments}
+        return {"status": "ok", "version": "5.4.0", "payments_enabled": cfg.payments}
 
     @app.get("/api/v1/config")
     async def config():
@@ -139,6 +144,32 @@ def create_app(settings=None, transport=None):
     async def preview(symbol: str):
         """Free availability check and recent headlines; does not initiate a payment."""
         return await app.state.news.preview(asset_for(symbol))
+
+    @app.get("/news/{symbol}/{article_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def news_card(symbol: str, article_id: str, request: Request, lang: str = "en"):
+        asset = asset_for(symbol)
+        def page(article=None, status=200, error="unavailable"):
+            return HTMLResponse(html_page(asset, lang, cfg.web_url, article, error), status_code=status,
+                                headers={"Content-Security-Policy": CSP})
+        if not re.fullmatch(r"[a-f0-9]{20}", article_id):
+            return page(status=404)
+        token = request.headers.get("payment-signature") or request.headers.get("x-payment")
+        if token:
+            # Read only: this route must never verify/settle a new payment or call providers.
+            _, fingerprint, proof = decode_payment(token)
+            purchased = app.state.payments.existing(fingerprint, resource(asset["symbol"]), proof)
+            if purchased is None:
+                return page(status=402, error="paywall")
+            report = json.loads(purchased.body)
+            article = next((a for a in report.get("articles", []) if a["id"] == article_id), None)
+            return page(article) if article else page(status=404)
+        article = app.state.store.cached("article:v1:" + asset["symbol"] + ":" + article_id, 30 * 86400)
+        if not article:
+            return page(status=404)
+        published = parse_date(article.get("published_at"))
+        if not published or published.date() >= datetime.now(timezone.utc).date():
+            return page(status=402, error="paywall")
+        return page(article)
 
     def check_origin(request):
         if request.headers.get("origin") and request.headers["origin"] not in origins:
