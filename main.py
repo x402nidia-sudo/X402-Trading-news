@@ -2,6 +2,7 @@
 from contextlib import asynccontextmanager, suppress
 import asyncio
 from typing import Literal
+from urllib.parse import urlsplit
 from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
@@ -43,6 +44,13 @@ class AlertToken(BaseModel):
     token: str = Field(min_length=40, max_length=100)
 
 
+Importance = Literal["all", "high", "medium", "low"]
+
+
+class PaymentStatusRequest(BaseModel):
+    signature: str = Field(min_length=1, max_length=32768)
+
+
 def create_app(settings=None, transport=None):
     cfg = settings or Settings.from_env()
     cfg = replace(cfg, demo=False, max_age_hours=min(cfg.max_age_hours, 24))
@@ -59,7 +67,7 @@ def create_app(settings=None, transport=None):
     async def lifespan(app):
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, timeout=15,
                                      limits=httpx.Limits(max_connections=12),
-                                     headers={"User-Agent": "TradingNews/5.5.0"}) as http:
+                                     headers={"User-Agent": "TradingNews/5.6.0"}) as http:
             store = Store(cfg.db_path)
             app.state.store = store
             app.state.news = NewsService(cfg, store, Providers(cfg, store, http), http)
@@ -79,7 +87,7 @@ def create_app(settings=None, transport=None):
                         with suppress(asyncio.CancelledError):
                             await worker
 
-    app = FastAPI(title="Trading News", version="5.5.0", lifespan=lifespan, docs_url=None,
+    app = FastAPI(title="Trading News", version="5.6.0", lifespan=lifespan, docs_url=None,
                   description=f"One asset report for {cfg.price_usdc} USDC via x402 v2 on Algorand. Use /api/v1/market-signal/{{symbol}}. Today's news ordered by explainable rules: asset relevance, recency, source priority, event and coverage. Includes scores, source links and dates. Includes indicative per-story BUY/SELL/HOLD impact signals based on explicit rules, without OpenAI. Free history excludes today. Report days use UTC.")
     app.state.settings = cfg
     rate = OrderedDict()
@@ -120,12 +128,22 @@ def create_app(settings=None, transport=None):
         except KeyError:
             raise HTTPException(404, "UNSUPPORTED_ASSET") from None
 
-    def resource(symbol):
-        return cfg.public_url + "/api/v1/market-signal/" + symbol
+    def resource(symbol, importance="all"):
+        suffix = "" if importance == "all" else "?importance=" + importance
+        return cfg.public_url + "/api/v1/market-signal/" + symbol + suffix
+
+    def signed_resource(payload, symbol=None):
+        url = payload.get("resource", {}).get("url", "")
+        parsed = urlsplit(url)
+        asset = asset_for(symbol or parsed.path.rsplit("/", 1)[-1])
+        importance = parsed.query.removeprefix("importance=") if parsed.query else "all"
+        if importance not in {"all", "high", "medium", "low"} or url != resource(asset["symbol"], importance):
+            raise HTTPException(403, "PAYMENT_REQUIREMENTS_MISMATCH")
+        return url
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "5.5.0", "payments_enabled": cfg.payments}
+        return {"status": "ok", "version": "5.6.0", "payments_enabled": cfg.payments}
 
     @app.get("/api/v1/config")
     async def config():
@@ -143,9 +161,9 @@ def create_app(settings=None, transport=None):
         return {"assets": list(ASSETS.values())}
 
     @app.get("/api/v1/news/{symbol}")
-    async def preview(symbol: str):
+    async def preview(symbol: str, importance: Importance = "all"):
         """Free availability check and recent headlines; does not initiate a payment."""
-        return await app.state.news.preview(asset_for(symbol))
+        return await app.state.news.preview(asset_for(symbol), importance)
 
     @app.get("/api/v1/history")
     async def history(symbol: str = "ALL", importance: Literal["all", "high", "medium", "low"] = "all"):
@@ -164,8 +182,8 @@ def create_app(settings=None, transport=None):
         token = request.headers.get("payment-signature") or request.headers.get("x-payment")
         if token:
             # Read only: this route must never verify/settle a new payment or call providers.
-            _, fingerprint, proof = decode_payment(token)
-            purchased = app.state.payments.existing(fingerprint, resource(asset["symbol"]), proof)
+            payload, fingerprint, proof = decode_payment(token)
+            purchased = app.state.payments.existing(fingerprint, signed_resource(payload, asset["symbol"]), proof)
             if purchased is None:
                 return page(status=402, error="paywall")
             report = json.loads(purchased.body)
@@ -195,11 +213,6 @@ def create_app(settings=None, transport=None):
         check_origin(request)
         return app.state.alerts.confirm(body.token)
 
-    @app.post("/api/v1/alerts/test", status_code=202)
-    async def test_alert(body: AlertToken, request: Request):
-        check_origin(request)
-        return await app.state.alerts.test_email(body.token)
-
     @app.post("/api/v1/alerts/unsubscribe")
     async def unsubscribe_alert(body: AlertToken, request: Request):
         check_origin(request)
@@ -210,30 +223,39 @@ def create_app(settings=None, transport=None):
         return app.state.alerts.page(action, lang)
 
     @app.post("/api/v1/checkout/{symbol}")
-    async def checkout(symbol: str, body: CheckoutRequest, request: Request):
+    async def checkout(symbol: str, body: CheckoutRequest, request: Request, importance: Importance = "all"):
         a = asset_for(symbol)
         if not cfg.payments:
             raise HTTPException(503, "PURCHASES_DISABLED")
         if request.headers.get("origin") and request.headers["origin"] not in origins:
             raise HTTPException(403, "ORIGIN_NOT_ALLOWED")
         # Check that useful, current content is available before asking for a signature.
-        report = await app.state.news.report(a)
+        report = await app.state.news.report(a, importance)
         if not report.get("best_article"):
             raise HTTPException(503, "NO_TODAY_NEWS")
-        return await app.state.checkout.prepare(body.address, resource(a["symbol"]))
+        return await app.state.checkout.prepare(body.address, resource(a["symbol"], importance))
+
+    @app.post("/api/v1/payments/status")
+    async def payment_status(body: PaymentStatusRequest, request: Request):
+        """Read-only chain lookup. Never signs, broadcasts or settles a payment."""
+        check_origin(request)
+        payload, _, _ = decode_payment(body.signature)
+        signed_resource(payload)
+        return await app.state.payments.status(body.signature)
 
     @app.get("/api/v1/market-signal/{symbol}")
-    async def report(symbol: str, request: Request):
+    async def report(symbol: str, request: Request, importance: Importance = "all"):
         """402 -> sign the advertised Algorand payment -> repeat with PAYMENT-SIGNATURE.
 
         Returns the complete ranked report and receipt. Reusing the exact signed
         payload retrieves the same purchased report without another settlement.
         """
         a = asset_for(symbol)
-        if request.query_params:
-            raise HTTPException(400, "Use the symbol in the path; query parameters are not supported.")
+        expected_query = "" if importance == "all" else "importance=" + importance
+        if str(request.query_params) != expected_query:
+            raise HTTPException(400, "Use the canonical resource URL returned by checkout.")
         token = request.headers.get("payment-signature") or request.headers.get("x-payment")
-        return await app.state.payments.access(token, resource(a["symbol"]), lambda: app.state.news.report(a))
+        return await app.state.payments.access(token, resource(a["symbol"], importance), lambda: app.state.news.report(a, importance))
 
     @app.get("/.well-known/x402.json")
     async def manifest():
