@@ -34,7 +34,7 @@ class Providers:
                 return [], dict(status, status="daily_limit")
             await asyncio.sleep(max(0, 1.1 - (time.monotonic() - self.last_request[provider])))
             self.last_request[provider] = time.monotonic()
-            start = datetime.now(timezone.utc) - timedelta(hours=self.settings.max_age_hours)
+            start = datetime.now(timezone.utc) - timedelta(hours=168)
             query = query_for(asset)
             params, headers = {}, {}
             if provider == "newsapi":

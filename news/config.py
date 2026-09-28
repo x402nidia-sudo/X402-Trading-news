@@ -45,6 +45,10 @@ class Settings:
     provider_keys: dict = field(default_factory=dict)
     provider_budgets: dict = field(default_factory=lambda: {"newsapi": 90, "gnews": 90})
     request_limit: int = 60
+    email_sender: str = ""
+    email_password: str = ""
+    alert_interval_hours: float = 0.5
+    web_url: str = "https://trading-news-web.onrender.com"
 
     @property
     def network(self):
@@ -68,7 +72,9 @@ class Settings:
             raise ValueError("CACHE_SECONDS must be >=10 and MAX_AGE_HOURS between 1 and 168")
         if self.request_limit < 1 or any(v < 0 for v in self.provider_budgets.values()):
             raise ValueError("Invalid quotas")
-        for value in (self.public_url, self.facilitator):
+        if not 0.5 <= self.alert_interval_hours <= 168:
+            raise ValueError("ALERT_INTERVAL_HOURS must be between 0.5 and 168")
+        for value in (self.public_url, self.facilitator, self.web_url):
             parsed = urlsplit(value)
             local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
             if parsed.scheme != "https" and not (local and parsed.scheme == "http"):
@@ -108,6 +114,10 @@ class Settings:
             provider_budgets={p: int(os.getenv(p.upper() + "_DAILY_LIMIT", str(n))) for p, n in
                               {"newsapi": 90, "gnews": 90}.items()},
             request_limit=int(os.getenv("REQUESTS_PER_MINUTE", "60")),
+            email_sender=os.getenv("EMAIL_REMITENTE", "").strip(),
+            email_password=os.getenv("EMAIL_PASSWORD", "").replace(" ", "").strip(),
+            alert_interval_hours=float(os.getenv("ALERT_INTERVAL_HOURS", "0.5")),
+            web_url=os.getenv("WEB_BASE_URL", "https://trading-news-web.onrender.com").rstrip("/"),
         )
         result.validate()
         return result

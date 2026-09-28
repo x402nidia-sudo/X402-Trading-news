@@ -92,7 +92,7 @@ def similar(left, right):
     return len(a & b) >= 4 and len(a & b) / max(1, len(a | b)) >= .72
 
 
-def rank_articles(raw, asset, max_age_hours=48, now=None):
+def rank_articles(raw, asset, max_age_hours=48, now=None, *, today_only=True):
     now = now or datetime.now(timezone.utc)
     eligible = []
     excluded = {"irrelevant": 0, "old_or_undated": 0, "invalid": 0}
@@ -103,7 +103,7 @@ def rank_articles(raw, asset, max_age_hours=48, now=None):
         if not url or not title:
             excluded["invalid"] += 1
             continue
-        if not dt or dt.date() != now.date() or (now - dt).total_seconds() < -300 or (now - dt).total_seconds() > max_age_hours * 3600:
+        if not dt or (today_only and dt.date() != now.date()) or (now - dt).total_seconds() < -300 or (now - dt).total_seconds() > max_age_hours * 3600:
             excluded["old_or_undated"] += 1
             continue
         article = {"id": hashlib.sha256(url.encode()).hexdigest()[:20], "title": title,
