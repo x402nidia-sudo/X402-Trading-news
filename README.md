@@ -2,7 +2,7 @@
 
 Pay-per-report news intelligence for 49 crypto assets, delivered through an x402 v2 API on Algorand.
 
-The service retrieves today's news, removes duplicates, ranks relevant stories and returns source links, publication dates and an explanation of the selection. Version 5.1 adds a BUY / SELL / HOLD assessment of every headline and excerpt included in the report.
+The service retrieves today's news, removes duplicates, ranks relevant stories and returns source links, publication dates and an explanation of the selection. Version 5.2 orders news entirely with explainable rules. It makes no OpenAI requests and generates no BUY / SELL / HOLD recommendation.
 
 - API base URL: https://x402-trading-news.onrender.com
 - API documentation: https://x402-trading-news.onrender.com/docs
@@ -10,16 +10,16 @@ The service retrieves today's news, removes duplicates, ranks relevant stories a
 
 ## Version requirement
 
-This README documents the **5.1 update**. Before deploying it, apply the latest versions of `main.py`, `news/config.py`, `news/providers.py`, `news/ai.py` and `news/service.py`, together with the matching frontend update. The older 5.0 package still includes Guardian, fixes the price in code and does not provide the whole-report signal.
+This README documents the **5.2 rules-only update**. Extract `backend_sin_openai.zip` at the root of `x402nidia-sudo/X402-Trading-news`, replacing `main.py`, `news/config.py`, `news/providers.py`, `news/ranking.py`, `news/service.py` and `README.md`. Keep all other existing application files. Delete the obsolete `news/ai.py`; it is no longer imported. Apply the matching frontend update. Do not delete the database or persistent disk.
 
-After deployment, `/health` must identify version `5.1.0`, and `/api/v1/config` must include `price_atomic` and only the NewsAPI/GNews providers.
+After deployment, `/health` must identify version `5.2.0`. `/api/v1/config` must include `selection_method: "rules"`, `ai_enabled: false`, `price_atomic` and only the NewsAPI/GNews providers.
 
 ## How it works
 
 1. Select an asset from the existing 49-symbol catalog.
 2. The backend queries the configured NewsAPI and/or GNews providers.
 3. It keeps relevant news published today in UTC, groups duplicate coverage and calculates an explainable priority score.
-4. OpenAI selects the leading article and evaluates all report headlines and excerpts. The overall assessment is returned in English, Spanish, French and German.
+4. The highest-scoring article leads the report. Every article includes the five score components and its selection reasons. Equal scores are resolved by newest publication date, then URL.
 5. The customer authorizes an Algorand USDC payment. The backend verifies and settles it through the facilitator before releasing the report.
 6. The purchased report and payment receipt are stored in SQLite. Reusing the same signed request recovers that purchase without a second settlement.
 
@@ -34,7 +34,7 @@ The default report price is **0.199 USDC**, configurable through `PRICE_USDC`. N
 | `assets.json` | Existing 49-symbol catalog |
 | `news/config.py`, `news/catalog.py` | Environment configuration and asset lookup |
 | `news/providers.py`, `news/ranking.py` | News retrieval, relevance, dates and deduplication |
-| `news/ai.py`, `news/service.py` | Semantic selection, whole-report assessment and orchestration |
+| `news/service.py` | Rule-based report orchestration and cache |
 | `news/checkout.py`, `news/payments.py` | Unsigned payment preparation, x402 verification and settlement |
 | `news/storage.py`, `news/__init__.py` | Durable storage and package initialization |
 
@@ -50,7 +50,7 @@ The previous application used **Node**. This backend requires the **Python 3** r
 
 1. Temporarily set Auto-Deploy to **Off** while uploading the update and configuring the service.
 2. Configure the environment variables below. Use **Save only**, if offered, until the remaining settings are ready.
-3. Change the instance to a paid instance type, such as Starter, and attach a persistent disk at `/var/data`. A 1 GB disk is an initial option; review the price shown in Render before confirming. This code requires that mount when payments are enabled.
+3. Change the instance to a paid instance type, the 7 USD/month, 0.5 CPU / 512 MB option shown in the dashboard, and attach a persistent disk at `/var/data`. A 1 GB disk is an initial option; review the price shown in Render before confirming. This code requires that mount when payments are enabled.
 4. Open **Settings → Build → Source → Edit**. Select `x402nidia-sudo/X402-Trading-news` again, even if the same repository name was previously connected. This reconnects the current source after a repository replacement.
 5. Set the following fields in the source/settings form:
 
@@ -89,15 +89,12 @@ Configure these in the backend service's **Environment** page. Values are string
 | `WEB_ORIGINS` | The actual frontend origin assigned by Render, such as `https://YOUR-WEB-SITE.onrender.com`; replace the example |
 | `NEWSAPI_KEY` | Your NewsAPI key, if using NewsAPI |
 | `GNEWS_API_KEY` | Your GNews key, if using GNews |
-| `AI_RERANK` | `true` |
-| `OPENAI_API_KEY` | Your OpenAI API project key with API access and available billing |
-| `OPENAI_MODEL` | `gpt-4.1-mini-2025-04-14` |
 
-At least one news provider must have a working key. Both can be enabled. NewsAPI and GNews retrieve news; OpenAI performs semantic analysis. The Guardian API is not used in version 5.1. Remove obsolete Guardian variables after applying the update.
+At least one news provider must have a working key. Both can be enabled. NewsAPI and GNews retrieve news; local rules rank their results. The Guardian API is not used. Remove obsolete Guardian variables. You can also remove `AI_RERANK`, `OPENAI_API_KEY`, `OPENAI_MODEL` and `AI_DAILY_LIMIT`: version 5.2 ignores them, even if they remain configured.
 
-Keep API keys in Render. Do not commit them to either repository or put them in browser JavaScript. NewsAPI/GNews commercial use and OpenAI API calls have their own plan/billing requirements; a free provider key does not imply permission to operate a paid news website. See [NewsAPI pricing](https://newsapi.org/pricing), [GNews pricing](https://gnews.io/pricing) and [OpenAI model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini).
+Keep API keys in Render. Do not commit them to either repository or put them in browser JavaScript. News providers have their own plan and commercial-use requirements; removing OpenAI does not remove these. See [NewsAPI pricing](https://newsapi.org/pricing) and [GNews pricing](https://gnews.io/pricing).
 
-Optional limits retain these defaults: `CACHE_SECONDS=900`, `MAX_AGE_HOURS=24`, `NEWS_LANGUAGE=en`, `AI_DAILY_LIMIT=50`, `NEWSAPI_DAILY_LIMIT=90`, `GNEWS_DAILY_LIMIT=90`, `REQUESTS_PER_MINUTE=60`. These are application limits, not guarantees about a provider subscription. `NEWS_LANGUAGE` controls retrieval language (`en`, `es` or `all`), independently of the frontend interface language.
+Optional limits retain these defaults: `CACHE_SECONDS=900`, `MAX_AGE_HOURS=24`, `NEWS_LANGUAGE=en`, `NEWSAPI_DAILY_LIMIT=90`, `GNEWS_DAILY_LIMIT=90`, `REQUESTS_PER_MINUTE=60`. These are application limits, not guarantees about a provider subscription. `NEWS_LANGUAGE` controls retrieval language (`en`, `es` or `all`), independently of the frontend interface language.
 
 Use the actual frontend origin in `WEB_ORIGINS`, without a trailing slash or path. Multiple origins are comma-separated. Wildcard `*` is rejected. While the website is not yet deployed, the API can start with only the existing local defaults; add the final website origin before enabling browser purchases.
 
@@ -119,13 +116,17 @@ The paid resource remains `/api/v1/market-signal/{symbol}`. There is one report 
 
 An AVM-capable x402 client requests the resource, reads the HTTP 402 challenge, signs the exact advertised payment and repeats the same GET with `PAYMENT-SIGNATURE`. Successful delivery includes the `PAYMENT-RESPONSE` receipt header and `billing.receipt` in the JSON body.
 
-The report includes `best_article`, `articles`, `stats`, `providers`, `assessment.signal`, `assessment.rationale`, per-article evaluations and `recommendation`. The signal describes the complete retrieved report, not only its leading article. It does not incorporate full article text, price charts or the customer's portfolio.
+New reports use schema `2.2` and include `best_article`, `articles`, `stats`, `providers`, source links, publication dates and `selection_reasons`. Each article contains `score` and `components`. `selection_method` is `rules`, `ai.status` is `disabled`, and `assessment` and `recommendation` are `null`. These compatibility fields do not invoke an AI service. Agents should interpret the result as ranked news, not a trading signal; the registered route name remains unchanged.
 
-News, analysis or quota failures prevent settlement. `HOLD` represents a valid assessment of neutral, mixed or insufficient evidence; an AI error produces `ANALYSIS_UNAVAILABLE` instead of an invented signal. `/health` is a liveness check, not verification that external providers or payment settlement work.
+The maximum score is 100: asset relevance 35, recency 25, predefined source priority 15, event 15, and coverage across domains 10. Speculative headlines reduce the event component. Source weights are editorial priorities, not factual verification; similar coverage does not prove independent confirmation. Selection uses retrieved headlines and excerpts, not full articles.
+
+Only relevant items dated today in UTC are eligible. Missing dates, irrelevant assets and old items are excluded, and duplicate headlines are grouped. The rules are optimized for English and Spanish; they do not translate news content. The website explains the selection in English, Spanish, French and German.
+
+If no provider is available or no relevant news remains, the backend blocks settlement. A failed provider can still yield a report from another available provider, marked as partial coverage. No AI credentials or AI quota are required. `/health` is a liveness check, not verification that external providers or payment settlement work.
 
 ## Payment recovery and network fees
 
-Keep the exact signed purchase request until its result is known. If the connection is interrupted, repeat that request to recover the stored report. A pending or unknown settlement must be reconciled rather than replaced with another payment.
+Previously purchased reports remain recoverable as originally stored, including any historical assessment, without an OpenAI call. Unsold caches from earlier versions are not used for new purchases. Keep the exact signed purchase request until its result is known. If the connection is interrupted, repeat that request to recover the stored report. A pending or unknown settlement must be reconciled rather than replaced with another payment.
 
 Algorand network fees are separate from the USDC report price. When the facilitator advertises a fee payer, the sponsored group covers those fees; otherwise the customer's network fee is shown before signing. The application includes `x402-global-challenge` metadata. It does not create a separate contest-fee transfer, and attribution must be checked in the merchant dashboard after a real purchase.
 
@@ -146,13 +147,13 @@ This checks startup and public endpoints without enabling purchases. For Windows
 
 ## Deployment checks
 
-- `/health` returns HTTP 200 with version `5.1.0`.
+- `/health` returns HTTP 200 with version `5.2.0`.
 - `/api/v1/config` returns `price_usdc: "0.199"` and `price_atomic: "199000"` at the default price.
 - `/api/v1/assets` returns 49 assets.
 - `/api/v1/market-signal/BTC` without a signature returns HTTP 402 when payments and the facilitator are available.
 - The frontend shows the expected price and recipient, and its origin is allowed by the backend.
 - A deliberate real purchase returns a confirmed receipt; recovering that purchase does not cause a second settlement.
 
-The release was checked with simulated providers, AI and payments. Live API credentials, wallet signing, production settlement and contest attribution require deployment verification.
+Version 5.2 passed 34 backend checks and 15 JavaScript/UI/wallet checks using simulated providers and payments. No real payment was made. Live API credentials, wallet signing, production settlement and contest attribution require deployment verification.
 
 Render references: [change the source/runtime](https://render.com/docs/native-runtimes#changing-a-services-runtime), [persistent disks](https://render.com/docs/disks), [manual deploys](https://render.com/docs/deploys), [GitHub access](https://render.com/docs/git-provider).
