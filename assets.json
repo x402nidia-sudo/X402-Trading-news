@@ -1,0 +1,406 @@
+[
+  {
+    "symbol": "BTC",
+    "name": "Bitcoin",
+    "aliases": [
+      "Bitcoin"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "ETH",
+    "name": "Ethereum",
+    "aliases": [
+      "Ethereum"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "USDT",
+    "name": "Tether USDT",
+    "aliases": [
+      "Tether",
+      "USDT"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "BNB",
+    "name": "Binance Coin",
+    "aliases": [
+      "Binance Coin",
+      "BNB"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "XRP",
+    "name": "Ripple XRP",
+    "aliases": [
+      "Ripple",
+      "XRP"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "SOL",
+    "name": "Solana blockchain",
+    "aliases": [
+      "Solana"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "STETH",
+    "name": "Ethereum staking",
+    "aliases": [
+      "stETH",
+      "Lido staked Ether"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "ADA",
+    "name": "Cardano",
+    "aliases": [
+      "Cardano"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "DOGE",
+    "name": "Dogecoin",
+    "aliases": [
+      "Dogecoin"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "DOT",
+    "name": "Polkadot",
+    "aliases": [
+      "Polkadot"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "MATIC",
+    "name": "Polygon Matic",
+    "aliases": [
+      "Polygon",
+      "MATIC"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "LTC",
+    "name": "Litecoin",
+    "aliases": [
+      "Litecoin"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "BCH",
+    "name": "Bitcoin Cash",
+    "aliases": [
+      "Bitcoin Cash"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "LINK",
+    "name": "Chainlink",
+    "aliases": [
+      "Chainlink"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "UNI",
+    "name": "Uniswap",
+    "aliases": [
+      "Uniswap"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "WBTC",
+    "name": "Wrapped Bitcoin",
+    "aliases": [
+      "Wrapped Bitcoin"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "ATOM",
+    "name": "Cosmos ATOM",
+    "aliases": [
+      "Cosmos",
+      "ATOM"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "XMR",
+    "name": "Monero",
+    "aliases": [
+      "Monero"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "XLM",
+    "name": "Stellar Lumens",
+    "aliases": [
+      "Stellar Lumens",
+      "XLM"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "AVAX",
+    "name": "Avalanche",
+    "aliases": [
+      "Avalanche"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "ARB",
+    "name": "Arbitrum",
+    "aliases": [
+      "Arbitrum"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "OP",
+    "name": "Optimism",
+    "aliases": [
+      "Optimism"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "FIL",
+    "name": "Filecoin",
+    "aliases": [
+      "Filecoin"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "GRT",
+    "name": "The Graph",
+    "aliases": [
+      "The Graph",
+      "GRT"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "APT",
+    "name": "Aptos",
+    "aliases": [
+      "Aptos"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "HBAR",
+    "name": "Hedera",
+    "aliases": [
+      "Hedera"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "FTM",
+    "name": "Fantom",
+    "aliases": [
+      "Fantom"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "ALGO",
+    "name": "Algorand",
+    "aliases": [
+      "Algorand"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "CRO",
+    "name": "Crypto.com",
+    "aliases": [
+      "Crypto.com",
+      "Cronos"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "MKR",
+    "name": "Maker MKR",
+    "aliases": [
+      "MakerDAO",
+      "MKR"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "AAVE",
+    "name": "Aave",
+    "aliases": [
+      "Aave"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "CRV",
+    "name": "Curve",
+    "aliases": [
+      "Curve"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "ICP",
+    "name": "Internet Computer",
+    "aliases": [
+      "Internet Computer"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "QNT",
+    "name": "Quant",
+    "aliases": [
+      "Quant Network",
+      "QNT"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "SUI",
+    "name": "Sui blockchain",
+    "aliases": [
+      "Sui"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "LDO",
+    "name": "Lido",
+    "aliases": [
+      "Lido"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "COMP",
+    "name": "Compound",
+    "aliases": [
+      "Compound"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "IMX",
+    "name": "Immutable X",
+    "aliases": [
+      "Immutable X"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "CVX",
+    "name": "Convex",
+    "aliases": [
+      "Convex"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "KAS",
+    "name": "Kaspa",
+    "aliases": [
+      "Kaspa"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "ZEC",
+    "name": "Zcash",
+    "aliases": [
+      "Zcash"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "DASH",
+    "name": "Dash coin",
+    "aliases": [
+      "Dash"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "AXS",
+    "name": "Axie Infinity",
+    "aliases": [
+      "Axie Infinity"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "SAND",
+    "name": "The Sandbox",
+    "aliases": [
+      "The Sandbox"
+    ],
+    "ambiguous": true
+  },
+  {
+    "symbol": "MANA",
+    "name": "Decentraland",
+    "aliases": [
+      "Decentraland"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "YFI",
+    "name": "Yearn Finance",
+    "aliases": [
+      "Yearn Finance",
+      "Yearn.finance"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "CAKE",
+    "name": "PancakeSwap",
+    "aliases": [
+      "PancakeSwap"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "BAL",
+    "name": "Balancer",
+    "aliases": [
+      "Balancer"
+    ],
+    "ambiguous": false
+  },
+  {
+    "symbol": "SNX",
+    "name": "Synthetix",
+    "aliases": [
+      "Synthetix"
+    ],
+    "ambiguous": false
+  }
+]
