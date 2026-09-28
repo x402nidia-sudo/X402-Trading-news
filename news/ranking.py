@@ -143,9 +143,11 @@ def rank_articles(raw, asset, max_age_hours=48, now=None):
         article["score"] = round(sum(article["components"].values()), 2)
         article["selection_reasons"] = [
             f"Asset relevance for {asset['symbol']}: {article['components']['relevance']}/35",
-            f"Age: {article['age_hours']} hours",
-            f"Event: {article['category']}",
-            f"Similar headlines across {len(domains)} domain(s); not independent verification",
+            f"Freshness: {article['components']['freshness']}/25; age {article['age_hours']} hours",
+            f"Source priority: {article['components']['source_priority']}/15; predefined domain weight",
+            f"Event: {article['category']}; {article['components']['event']}/15",
+            f"Coverage: {article['components']['coverage']}/10; similar headlines across {len(domains)} domain(s); not independent verification",
+            f"Total priority: {article['score']}/100; ties use newest publication then URL",
         ]
         if article["speculative"]:
             article["selection_reasons"].append("Speculative headline: reduced priority")

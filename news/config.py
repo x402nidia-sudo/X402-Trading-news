@@ -44,10 +44,6 @@ class Settings:
     language: str = "en"
     provider_keys: dict = field(default_factory=dict)
     provider_budgets: dict = field(default_factory=lambda: {"newsapi": 90, "gnews": 90})
-    ai_enabled: bool = False
-    ai_key: str = ""
-    ai_model: str = "gpt-4.1-mini-2025-04-14"
-    ai_daily_limit: int = 50
     request_limit: int = 60
 
     @property
@@ -70,7 +66,7 @@ class Settings:
             raise ValueError("NEWS_LANGUAGE must be en, es or all")
         if self.cache_seconds < 10 or not 1 <= self.max_age_hours <= 168:
             raise ValueError("CACHE_SECONDS must be >=10 and MAX_AGE_HOURS between 1 and 168")
-        if self.request_limit < 1 or self.ai_daily_limit < 0 or any(v < 0 for v in self.provider_budgets.values()):
+        if self.request_limit < 1 or any(v < 0 for v in self.provider_budgets.values()):
             raise ValueError("Invalid quotas")
         for value in (self.public_url, self.facilitator):
             parsed = urlsplit(value)
@@ -89,8 +85,6 @@ class Settings:
                 raise ValueError("Payments require persistent storage")
         if self.admin_token and len(self.admin_token) < 24:
             raise ValueError("ADMIN_TOKEN must have at least 24 characters")
-        if self.ai_enabled and (not self.ai_key or not self.ai_model):
-            raise ValueError("AI_RERANK requires OPENAI_API_KEY and OPENAI_MODEL")
 
     @classmethod
     def from_env(cls):
@@ -113,8 +107,6 @@ class Settings:
             }.items()},
             provider_budgets={p: int(os.getenv(p.upper() + "_DAILY_LIMIT", str(n))) for p, n in
                               {"newsapi": 90, "gnews": 90}.items()},
-            ai_enabled=flag("AI_RERANK"), ai_key=os.getenv("OPENAI_API_KEY", ""),
-            ai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini-2025-04-14"), ai_daily_limit=int(os.getenv("AI_DAILY_LIMIT", "50")),
             request_limit=int(os.getenv("REQUESTS_PER_MINUTE", "60")),
         )
         result.validate()
