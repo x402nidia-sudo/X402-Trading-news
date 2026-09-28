@@ -81,6 +81,59 @@ class NewsService:
     async def report(self, asset):
         return (await self.snapshot(asset))["report"]
 
+    async def history(self, asset=None, importance="all"):
+        """Read public, archived stories; today's content is never returned here.
+
+        A selected coin can refresh its own archive. ALL reads the collected
+        archive without spending provider quotas on 49 simultaneous searches.
+        """
+        failure = None
+        partial = False
+        if asset:
+            try:
+                snapshot = await self.snapshot(asset)
+                partial = any(s["status"] not in {"ok", "not_configured"}
+                              for s in snapshot["report"]["providers"])
+            except NoProviders as exc:
+                failure, partial = exc, True
+        now = datetime.now(timezone.utc)
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff = now - timedelta(days=7)
+        pattern = "article:v1:" + (asset["symbol"] + ":%" if asset else "%")
+        with self.store.connect() as db:
+            rows = db.execute("SELECT key,body FROM cache WHERE key LIKE ? AND created>=?",
+                              (pattern, time.time() - 30 * 86400)).fetchall()
+        articles = []
+        for row in rows:
+            try:
+                symbol = row["key"].split(":")[2]
+                if symbol not in ASSETS:
+                    continue
+                article = json.loads(row["body"])
+                published = parse_date(article.get("published_at"))
+                if published is None or not cutoff <= published < midnight:
+                    continue
+                insight = article["insight"]
+                level = insight["importance"]["level"]
+                if importance != "all" and level != importance:
+                    continue
+                public = {k: article[k] for k in ("id", "title", "source", "published_at")}
+                public.update({"symbol": symbol, "name": ASSETS[symbol]["name"],
+                               "importance": {"level": level},
+                               "recommendation": {"signal": insight["recommendation"]["signal"]}})
+                articles.append((published, public))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if failure and not articles:
+            raise failure
+        articles.sort(key=lambda pair: (-pair[0].timestamp(), pair[1]["symbol"], pair[1]["id"]))
+        return {"symbol": asset["symbol"] if asset else "ALL", "importance": importance,
+                "name": asset["name"] if asset else None, "day_utc": now.date().isoformat(),
+                "checked_at": now.isoformat(), "latest_window_days": 7,
+                "partial_sources": partial, "scope": "collected_archive",
+                "has_more": len(articles) > 200, "limit": 200,
+                "articles": [a for _, a in articles[:200]]}
+
     async def preview(self, asset):
         snapshot = await self.snapshot(asset)
         report = snapshot["report"]
@@ -97,4 +150,3 @@ class NewsService:
                               "importance": a["insight"]["importance"],
                               "recommendation": {"signal": a["insight"]["recommendation"]["signal"]}}
                              for a in history]}
-
