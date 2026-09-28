@@ -35,7 +35,7 @@ class Settings:
     public_url: str = "http://127.0.0.1:8000"
     network_name: str = "testnet"
     pay_to: str = ""
-    price_usdc: str = "0.199"
+    price_usdc: str = "0.2"
     facilitator: str = "https://facilitator.goplausible.xyz"
     admin_token: str = ""
     db_path: str = str(ROOT / "data" / "news.sqlite3")
@@ -101,7 +101,7 @@ class Settings:
             public_url=os.getenv("PUBLIC_BASE_URL", "https://x402-trading-news.onrender.com").rstrip("/"),
             network_name=os.getenv("ALGORAND_NETWORK", "mainnet"),
             pay_to=os.getenv("PAYTO_ADDRESS") or os.getenv("PAY_TO_ALGORAND_ADDRESS") or os.getenv("PAY_TO_ADDRESS", ""),
-            price_usdc=os.getenv("PRICE_USDC", "0.199").strip(),
+            price_usdc=os.getenv("PRICE_USDC", "0.2").strip(),
             facilitator=os.getenv("FACILITATOR_URL", "https://facilitator.goplausible.xyz").rstrip("/"),
             admin_token=os.getenv("ADMIN_TOKEN", ""),
             db_path=os.getenv("DATABASE_PATH", str(ROOT / "data" / "news.sqlite3")),
