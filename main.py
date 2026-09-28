@@ -1,5 +1,7 @@
 """Trading News API. Retains all 49 registered market-signal resource URLs."""
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
+from typing import Literal
 from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
@@ -17,10 +19,21 @@ from news.providers import Providers
 from news.service import NewsService, NoProviders
 from news.storage import Store
 from news.checkout import Checkout
+from news.alerts import Alerts
 
 
 class CheckoutRequest(BaseModel):
     address: str = Field(min_length=58, max_length=58)
+
+
+class AlertRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    symbol: str = Field(min_length=1, max_length=12)
+    language: Literal["en", "es", "fr", "de"] = "en"
+
+
+class AlertToken(BaseModel):
+    token: str = Field(min_length=40, max_length=100)
 
 
 def create_app(settings=None, transport=None):
@@ -39,15 +52,27 @@ def create_app(settings=None, transport=None):
     async def lifespan(app):
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, timeout=15,
                                      limits=httpx.Limits(max_connections=12),
-                                     headers={"User-Agent": "TradingNews/5.2"}) as http:
+                                     headers={"User-Agent": "TradingNews/5.3"}) as http:
             store = Store(cfg.db_path)
             app.state.store = store
             app.state.news = NewsService(cfg, store, Providers(cfg, store, http), http)
             app.state.payments = PaymentGateway(cfg, store, http)
             app.state.checkout = Checkout(cfg, http, app.state.payments)
-            yield
+            app.state.alerts = Alerts(cfg, store, app.state.news)
+            worker = asyncio.create_task(app.state.alerts.run()) if app.state.alerts.enabled else None
+            try:
+                yield
+            finally:
+                app.state.alerts.stop.set()
+                if worker:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(worker), timeout=20)
+                    except TimeoutError:
+                        worker.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await worker
 
-    app = FastAPI(title="Trading News · Agent API", version="5.2.0", lifespan=lifespan,
+    app = FastAPI(title="Trading News · Agent API", version="5.3.0", lifespan=lifespan,
                   description=f"One asset report for {cfg.price_usdc} USDC via x402 v2 on Algorand. Use /api/v1/market-signal/{{symbol}}. Today's news ordered by explainable rules: asset relevance, recency, source priority, event and coverage. Includes scores, source links and dates. No OpenAI dependency or BUY/SELL/HOLD recommendation. Report days use UTC.")
     app.state.settings = cfg
     rate = OrderedDict()
@@ -93,7 +118,7 @@ def create_app(settings=None, transport=None):
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "5.2.0", "payments_enabled": cfg.payments}
+        return {"status": "ok", "version": "5.3.0", "payments_enabled": cfg.payments}
 
     @app.get("/api/v1/config")
     async def config():
@@ -103,11 +128,42 @@ def create_app(settings=None, transport=None):
                 "report_path": "/api/v1/market-signal/{symbol}", "day_timezone": "UTC",
                 "providers": [{"name": p, "configured": bool(cfg.provider_keys.get(p))}
                               for p in ("newsapi", "gnews")], "ai_enabled": False,
-                "selection_method": "rules"}
+                "selection_method": "rules", "email_alerts_enabled": app.state.alerts.enabled,
+                "alert_interval_minutes": cfg.alert_interval_hours * 60}
 
     @app.get("/api/v1/assets")
     async def assets():
         return {"assets": list(ASSETS.values())}
+
+    @app.get("/api/v1/news/{symbol}")
+    async def preview(symbol: str):
+        """Free availability check and recent headlines; does not initiate a payment."""
+        return await app.state.news.preview(asset_for(symbol))
+
+    def check_origin(request):
+        if request.headers.get("origin") and request.headers["origin"] not in origins:
+            raise HTTPException(403, "ORIGIN_NOT_ALLOWED")
+
+    @app.post("/api/v1/alerts/subscribe", status_code=202)
+    async def subscribe(body: AlertRequest, request: Request):
+        check_origin(request)
+        asset = asset_for(body.symbol)
+        return await app.state.alerts.subscribe(body.email, asset["symbol"], body.language,
+                                                request.client.host if request.client else "unknown")
+
+    @app.post("/api/v1/alerts/confirm")
+    async def confirm_alert(body: AlertToken, request: Request):
+        check_origin(request)
+        return app.state.alerts.confirm(body.token)
+
+    @app.post("/api/v1/alerts/unsubscribe")
+    async def unsubscribe_alert(body: AlertToken, request: Request):
+        check_origin(request)
+        return app.state.alerts.unsubscribe(body.token)
+
+    @app.get("/alerts/{action}", include_in_schema=False)
+    async def alert_page(action: Literal["confirm", "unsubscribe"], lang: str = "en"):
+        return app.state.alerts.page(action, lang)
 
     @app.post("/api/v1/checkout/{symbol}")
     async def checkout(symbol: str, body: CheckoutRequest, request: Request):
