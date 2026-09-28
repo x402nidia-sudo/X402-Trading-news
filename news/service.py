@@ -3,8 +3,10 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import time
 from .catalog import ASSETS
 from .ranking import rank_articles, parse_date
+from .insights import build_insight
 
 
 class NoProviders(Exception):
@@ -23,7 +25,7 @@ class NewsService:
                             "language": self.settings.language, "asset": asset,
                             "providers": sorted(k for k, v in self.settings.provider_keys.items() if v)}
         # Separate unsold reports from earlier AI caches; purchased receipts stay recoverable.
-        key = symbol + ":v8:preview:" + hashlib.sha256(json.dumps(config_signature, sort_keys=True).encode()).hexdigest()[:20]
+        key = symbol + ":v9:cards:" + hashlib.sha256(json.dumps(config_signature, sort_keys=True).encode()).hexdigest()[:20]
         async with self.locks[symbol]:
             cached = self.store.cached(key, self.settings.cache_seconds)
             now = datetime.now(timezone.utc)
@@ -40,14 +42,16 @@ class NewsService:
                 self.store.cache(key + ":failure", states)
                 raise NoProviders(states)
             articles, stats = rank_articles(raw, asset, self.settings.max_age_hours)
+            for article in articles:
+                article["insight"] = build_insight(article, asset)
             best = articles[0] if articles else None
-            warnings = ["Rule-based priority scores describe news relevance, not BUY/SELL/HOLD signals or price predictions.",
+            warnings = ["Priority scores measure relevance. Per-article BUY/SELL/HOLD signals are heuristic interpretations of the headline and available excerpt, not price forecasts or personalized investment advice.",
                         "Source priority uses predefined domain weights, not factual verification.",
                         "Coverage across domains does not establish accuracy or independent verification."]
             if any(s["status"] not in {"ok", "not_configured"} for s in states):
                 warnings.append("Partial coverage: a source could not be queried.")
             report = {
-                "schema_version": "2.2", "symbol": symbol, "name": asset["name"],
+                "schema_version": "2.3", "symbol": symbol, "name": asset["name"],
                 "status": "ok" if best else "no_relevant_news", "demo": self.settings.demo,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "window_hours": self.settings.max_age_hours, "day_utc": now.date().isoformat(), "language": self.settings.language,
@@ -64,7 +68,13 @@ class NewsService:
                 "assessment": report["assessment"]}
             report["report_id"] = hashlib.sha256(json.dumps(fingerprint, sort_keys=True).encode()).hexdigest()[:24]
             latest, _ = rank_articles(raw, asset, 168, now, today_only=False)
-            snapshot = {"report": report, "latest": latest[:10]}
+            for article in latest:
+                article["insight"] = build_insight(article, asset)
+                public = {k: article[k] for k in ("id", "title", "summary", "url", "source", "published_at", "insight")}
+                self.store.cache("article:v1:" + symbol + ":" + article["id"], public)
+            with self.store.connect() as db:
+                db.execute("DELETE FROM cache WHERE key LIKE 'article:v1:%' AND created<?", (time.time() - 30 * 86400,))
+            snapshot = {"report": report, "latest": latest[:40]}
             self.store.cache(key, snapshot)
             return snapshot
 
@@ -74,12 +84,17 @@ class NewsService:
     async def preview(self, asset):
         snapshot = await self.snapshot(asset)
         report = snapshot["report"]
-        # Public headlines and source links; explanations and the full ranking remain paid.
-        fields = ("id", "title", "url", "source", "published_at")
+        # Strict UTC boundary: no current/future headline, summary or signal in public previews.
+        fields = ("id", "title", "source", "published_at")
+        today = datetime.now(timezone.utc).date()
+        history = [a for a in snapshot["latest"] if parse_date(a["published_at"]).date() < today][:10]
         return {"symbol": asset["symbol"], "name": asset["name"],
                 "status": "available" if report["best_article"] else "no_today_news",
                 "has_today_news": bool(report["best_article"]), "day_utc": report["day_utc"],
                 "checked_at": report["generated_at"], "latest_window_days": 7,
                 "partial_sources": any(s["status"] not in {"ok", "not_configured"} for s in report["providers"]),
-                "articles": [{k: a[k] for k in fields} for a in snapshot["latest"]]}
+                "articles": [{**{k: a[k] for k in fields},
+                              "importance": a["insight"]["importance"],
+                              "recommendation": {"signal": a["insight"]["recommendation"]["signal"]}}
+                             for a in history]}
 

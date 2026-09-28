@@ -171,8 +171,7 @@ class Alerts:
         copy = COPY[subscription["language"]]
         web = self.cfg.web_url + "/?" + urlencode({"asset": subscription["symbol"], "lang": subscription["language"]})
         lines = [copy["intro"], "", copy["open"] + ": " + web, ""]
-        for article in fresh[:10]:
-            lines.extend([article["title"], article["source"] + " · " + article["published_at"], article["url"], ""])
+        # Alerts announce availability only. Today's headlines/content remain paid.
         lines.extend([copy["privacy"], copy["unsubscribe"] + ": " + self.url("unsubscribe", subscription["unsubscribe_token"], subscription["language"])])
         state = "sent"
         try:

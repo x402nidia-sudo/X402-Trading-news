@@ -4,6 +4,7 @@ from email.utils import parsedate_to_datetime
 import time
 import httpx
 from .catalog import query_for
+from .ranking import NON_NEWS_DOMAINS
 
 
 def retry_delay(value):
@@ -39,11 +40,13 @@ class Providers:
             params, headers = {}, {}
             if provider == "newsapi":
                 url = "https://newsapi.org/v2/everything"
-                params = {"q": query, "pageSize": 30, "sortBy": "publishedAt", "from": start.isoformat()}
+                params = {"q": query, "pageSize": 30, "sortBy": "publishedAt", "from": start.isoformat(),
+                          "excludeDomains": ",".join(sorted(NON_NEWS_DOMAINS)), "searchIn": "title,description"}
                 headers = {"X-Api-Key": key}
             else:
                 url = "https://gnews.io/api/v4/search"
-                params = {"q": query[:200], "apikey": key, "max": 10,
+                filtered_query = "(" + query + ') NOT "added to PyPI"'
+                params = {"q": filtered_query if len(filtered_query) <= 200 else query[:200], "apikey": key, "max": 10,
                           "sortby": "publishedAt", "from": start.isoformat()}
             if self.settings.language != "all":
                 params["language" if provider == "newsapi" else "lang"] = self.settings.language
@@ -60,7 +63,7 @@ class Providers:
                 data = res.json()
                 if (provider == "newsapi" and data.get("status") != "ok") or "articles" not in data:
                     return [], dict(status, status="invalid_response")
-                items = [{"title": x.get("title"), "summary": x.get("description"),
+                items = [{"title": x.get("title"), "summary": x.get("description") or x.get("content"),
                           "url": x.get("url"), "source": (x.get("source") or {}).get("name", provider),
                           "provider": provider, "published_at": x.get("publishedAt")}
                          for x in data["articles"] if isinstance(x, dict)]

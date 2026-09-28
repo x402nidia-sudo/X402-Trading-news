@@ -1,8 +1,9 @@
-"""Explainable prioritisation of headlines; never a buy/sell signal."""
+"""Explainable prioritisation and filtering of real news headlines."""
 from datetime import datetime, timezone
 import hashlib
 import html
 import math
+import ipaddress
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -19,6 +20,8 @@ EVENTS = {
     "adoption": (.65, r"\b(adoption|partnership|launch|integrat\w*|alianza|adopci\w*)\b"),
     "macro": (.7, r"\b(inflation|interest rate|federal reserve|fed|inflaci\w*)\b"),
 }
+NON_NEWS_DOMAINS = {"pypi.org", "pythonhosted.org", "npmjs.com", "libraries.io", "packagist.org", "nuget.org"}
+
 STOP = set("the a an and or in of for to at on is are as by with from after says new news el la de del y en un una para por tras que los las".split())
 
 
@@ -30,6 +33,16 @@ def canonical_url(value):
     try:
         p = urlsplit(value)
         if p.scheme not in {"http", "https"} or not p.hostname or p.username or p.password:
+            return None
+        host = p.hostname.lower()
+        if host == "localhost" or host.endswith((".localhost", ".local", ".internal")) or "." not in host or p.port not in {None, 80, 443}:
+            return None
+        try:
+            if not ipaddress.ip_address(host).is_global:
+                return None
+        except ValueError:
+            pass
+        if any(ord(c) < 32 for c in value) or "\\" in value:
             return None
         qs = [(k, v) for k, v in parse_qsl(p.query) if not k.lower().startswith("utm_") and
               k.lower() not in {"fbclid", "gclid", "mc_cid", "mc_eid"}]
@@ -95,7 +108,7 @@ def similar(left, right):
 def rank_articles(raw, asset, max_age_hours=48, now=None, *, today_only=True):
     now = now or datetime.now(timezone.utc)
     eligible = []
-    excluded = {"irrelevant": 0, "old_or_undated": 0, "invalid": 0}
+    excluded = {"irrelevant": 0, "old_or_undated": 0, "invalid": 0, "non_news": 0}
     for item in raw:
         url = canonical_url(item.get("url"))
         dt = parse_date(item.get("published_at"))
@@ -103,11 +116,17 @@ def rank_articles(raw, asset, max_age_hours=48, now=None, *, today_only=True):
         if not url or not title:
             excluded["invalid"] += 1
             continue
+        if publisher_domain(url) in NON_NEWS_DOMAINS or re.search(r"\badded to (?:PyPI|npm|NuGet)\b|\barc56-generated-", title, re.I):
+            excluded["non_news"] += 1
+            continue
+        if title.casefold() in {"[removed]", "removed", "page not found", "404 not found"}:
+            excluded["invalid"] += 1
+            continue
         if not dt or (today_only and dt.date() != now.date()) or (now - dt).total_seconds() < -300 or (now - dt).total_seconds() > max_age_hours * 3600:
             excluded["old_or_undated"] += 1
             continue
         article = {"id": hashlib.sha256(url.encode()).hexdigest()[:20], "title": title,
-                   "url": url, "summary": clean_text(item.get("summary"), 320),
+                   "url": str(item["url"]).strip(), "summary": clean_text(item.get("summary"), 1200),
                    "source": clean_text(item.get("source"), 100), "domain": publisher_domain(url),
                    "published_at": dt.isoformat(), "providers": [item["provider"]],
                    "coverage": [{"url": url, "source": clean_text(item.get("source"), 100), "domain": publisher_domain(url)}]}
@@ -129,7 +148,7 @@ def rank_articles(raw, asset, max_age_hours=48, now=None, *, today_only=True):
     eligible.sort(key=lambda a: (-sum(a["components"].values()), a["url"]))
     unique = []
     for article in eligible:
-        group = next((a for a in unique if a["url"] == article["url"] or similar(a["title"], article["title"])), None)
+        group = next((a for a in unique if canonical_url(a["url"]) == canonical_url(article["url"]) or similar(a["title"], article["title"])), None)
         if group:
             group["providers"] = sorted(set(group["providers"] + article["providers"]))
             if article["url"] not in {x["url"] for x in group["coverage"]}:
