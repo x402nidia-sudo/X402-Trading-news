@@ -54,7 +54,7 @@ class Checkout:
                 if first <= 0 or not 1000 <= minimum <= 10000 or int(d.get("fee", 0)) > 0:
                     raise ValueError("params")
                 self._params = transaction.SuggestedParams(
-                    fee=minimum, first=first, last=first + 100,
+                    fee=minimum, first=first, last=first + 300,
                     gh=d["genesis-hash"], gen=d.get("genesis-id"), flat_fee=True, min_fee=minimum)
                 self._params_at = time.monotonic()
                 return self._params
@@ -70,6 +70,28 @@ class Checkout:
         fee_payer = requirement.get("extra", {}).get("feePayer")
         if address == fee_payer:
             raise HTTPException(400, "PAYER_MUST_DIFFER_FROM_FEE_SPONSOR")
+        # Wallet signing does not check that the transfer can actually be paid.
+        # Reject insufficient/frozen USDC before asking Pera or a Ledger to sign.
+        try:
+            response = await self.http.get(ALGOD[self.cfg.network_name] + "/v2/accounts/" + address, timeout=12)
+            if response.status_code == 404:
+                raise HTTPException(400, "USDC_OPT_IN_REQUIRED")
+            response.raise_for_status()
+            account = response.json()
+            holding = next((a for a in account["assets"] if str(a["asset-id"]) == self.cfg.asset), None)
+            if not holding:
+                raise HTTPException(400, "USDC_OPT_IN_REQUIRED")
+            if holding.get("is-frozen"):
+                raise HTTPException(400, "USDC_HOLDING_FROZEN")
+            if type(holding["amount"]) is not int:
+                raise ValueError("Invalid balance response")
+            if holding["amount"] < int(self.cfg.amount):
+                raise HTTPException(400, {"code": "INSUFFICIENT_USDC_BALANCE",
+                                          "available_atomic": str(holding["amount"]), "required_atomic": self.cfg.amount})
+            if account.get("auth-addr") and account["auth-addr"] != address:
+                raise HTTPException(400, "REKEYED_WALLET_UNSUPPORTED")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            raise HTTPException(503, "WALLET_BALANCE_UNAVAILABLE") from None
         signer = UnsignedSigner(address)
         params = await self.params()
         payload = PreparedScheme(signer, params).create_payment_payload(PaymentRequirements.model_validate(requirement))
@@ -84,5 +106,5 @@ class Checkout:
             "payer": address, "price_usdc": self.cfg.price_usdc,
             "network": self.cfg.network_name, "network_fee_microalgo": sum(t.fee for t in decoded),
             "customer_network_fee_microalgo": decoded[payload["paymentIndex"]].fee,
-            "network_fee_sponsored": bool(fee_payer), "expires_at": int(time.time()) + 180,
+            "network_fee_sponsored": bool(fee_payer), "expires_at": int(time.time()) + 300,
         }

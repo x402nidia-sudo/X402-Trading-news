@@ -41,12 +41,6 @@ COPY = {
         "low": "🟡 Less important",
         "unknown": "Importance unavailable",
         "buy": "Buy the {symbol} report",
-        "test": "Send test email",
-        "test_subject": "[TEST] Trading News email alerts",
-        "test_intro": "This is a test email with sample importance levels. It does not announce real news, buy a report or mark any news as notified.",
-        "test_sending": "Sending test email…",
-        "test_sent": "Test email sent. Check your inbox and spam folder.",
-        "test_limit": "The daily test email limit has been reached. Try again tomorrow."
     },
     "es": {
         "confirm": "Confirmar avisos de noticias",
@@ -67,12 +61,6 @@ COPY = {
         "low": "🟡 Menos importante",
         "unknown": "Importancia no disponible",
         "buy": "Comprar el informe de {symbol}",
-        "test": "Enviar correo de prueba",
-        "test_subject": "[PRUEBA] Avisos de Trading News",
-        "test_intro": "Este es un correo de prueba con niveles de importancia de ejemplo. No anuncia noticias reales, no compra ningún informe ni marca noticias como notificadas.",
-        "test_sending": "Enviando correo de prueba…",
-        "test_sent": "Correo de prueba enviado. Revisa tu bandeja de entrada y spam.",
-        "test_limit": "Has alcanzado el límite diario de correos de prueba. Inténtalo mañana."
     },
     "fr": {
         "confirm": "Confirmer les alertes",
@@ -93,12 +81,6 @@ COPY = {
         "low": "🟡 Moins importante",
         "unknown": "Importance indisponible",
         "buy": "Acheter le rapport {symbol}",
-        "test": "Envoyer un e-mail de test",
-        "test_subject": "[TEST] Alertes Trading News",
-        "test_intro": "Ceci est un e-mail de test avec des niveaux d’importance fictifs. Il n’annonce aucune actualité réelle, n’achète aucun rapport et ne marque aucune actualité comme notifiée.",
-        "test_sending": "Envoi de l’e-mail de test…",
-        "test_sent": "E-mail de test envoyé. Vérifiez votre boîte de réception et vos spams.",
-        "test_limit": "La limite quotidienne des e-mails de test a été atteinte. Réessayez demain."
     },
     "de": {
         "confirm": "Nachrichtenbenachrichtigungen bestätigen",
@@ -119,12 +101,6 @@ COPY = {
         "low": "🟡 Weniger wichtig",
         "unknown": "Bedeutung nicht verfügbar",
         "buy": "Bericht zu {symbol} kaufen",
-        "test": "Test-E-Mail senden",
-        "test_subject": "[TEST] Trading News Benachrichtigungen",
-        "test_intro": "Dies ist eine Test-E-Mail mit beispielhaften Wichtigkeitsstufen. Sie meldet keine echten Nachrichten, kauft keinen Bericht und markiert keine Nachrichten als versendet.",
-        "test_sending": "Test-E-Mail wird gesendet…",
-        "test_sent": "Test-E-Mail gesendet. Prüfen Sie Ihren Posteingang und Spamordner.",
-        "test_limit": "Das Tageslimit für Test-E-Mails wurde erreicht. Versuchen Sie es morgen erneut."
     }
 }
 
@@ -271,38 +247,17 @@ class Alerts:
                 db.execute("DELETE FROM news_subscriptions WHERE id=?", (row["id"],))
         return {"status": "unsubscribed"}
 
-    def mail_content(self, subscription, levels, test=False):
+    def mail_content(self, subscription, levels):
         copy = COPY[subscription["language"]]
         symbols = sorted(levels)
-        lines = [copy["test_intro"] if test else copy["intro"], "", copy["importance_note"], ""]
+        lines = [copy["intro"], "", copy["importance_note"], ""]
         for symbol in symbols:
             web = self.cfg.web_url + "/?" + urlencode({"asset": symbol, "lang": subscription["language"]})
             lines.extend([symbol + " · " + ASSETS[symbol]["name"] + " — " + copy[levels[symbol]],
                           copy["buy"].format(symbol=symbol) + ": " + web, ""])
         lines.extend([copy["privacy"], copy["unsubscribe"] + ": " + self.url("unsubscribe", subscription["unsubscribe_token"], subscription["language"])])
-        subject = copy["test_subject"] if test else copy["news"].format(symbol=", ".join(symbols))
+        subject = copy["news"].format(symbol=", ".join(symbols))
         return subject, "\n".join(lines)
-
-    async def test_email(self, token):
-        if not self.enabled:
-            raise HTTPException(503, "EMAIL_NOT_CONFIGURED")
-        with self.store.connect() as db:
-            row = db.execute("SELECT * FROM news_subscriptions WHERE confirm_hash=? AND confirmed=1", (digest(token),)).fetchone()
-        if not row:
-            raise HTTPException(400, "INVALID_ALERT_LINK")
-        subscription = dict(row)
-        if not self.store.budget("alert_tests:" + digest(subscription["email"]), 3):
-            raise HTTPException(429, "EMAIL_LIMIT")
-        levels = {"BTC": "high", "ETH": "medium", "ALGO": "low"} if subscription["symbol"] == "ALL" else {subscription["symbol"]: "high"}
-        subject, body = self.mail_content(subscription, levels, test=True)
-        try:
-            await self.send(subscription["email"], subject, body)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            LOG.warning("Test email failed (%s)", type(exc).__name__)
-            raise HTTPException(503, "EMAIL_UNAVAILABLE") from None
-        return {"status": "test_sent"}
 
     async def notify(self, subscription, reports):
         # Claim before SMTP. An ambiguous network interruption is never auto-retried:
@@ -419,13 +374,11 @@ class Alerts:
         language = language if language in COPY else "en"
         copy = COPY[language]
         nonce = secrets.token_urlsafe(18)
-        payload = json.dumps({"action": action, "ok": copy["done_" + action].format(minutes=format(self.cfg.alert_interval_hours * 60, "g")), "error": copy["error"],
-                              "test_sending": copy["test_sending"], "test_sent": copy["test_sent"], "test_limit": copy["test_limit"]})
+        payload = json.dumps({"action": action, "ok": copy["done_" + action].format(minutes=format(self.cfg.alert_interval_hours * 60, "g")), "error": copy["error"]})
         title = html.escape(copy[action])
         content = f'''<!doctype html><html lang="{language}"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{title} · Trading News</title>
 <style nonce="{nonce}">body{{font:16px/1.6 system-ui;background:#f4f7fc;color:#123965;max-width:580px;margin:12vh auto;padding:24px}}button{{background:#175aa2;color:white;padding:14px 22px;border:0;border-radius:8px;font:inherit;cursor:pointer}}</style>
 <h1>{title}</h1><p id="message" role="status">{html.escape(copy['action'])}</p><button id="action">{title}</button>
-<button id="test" hidden>{html.escape(copy['test'])}</button><p id="test-result" role="status"></p>
-<script nonce="{nonce}">const data={payload};const token=location.hash.slice(1);history.replaceState(null,'',location.pathname+location.search);document.getElementById('action').onclick=async function(){{this.disabled=true;try{{const r=await fetch('/api/v1/alerts/'+data.action,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{token}})}});if(!r.ok)throw Error();document.getElementById('message').textContent=data.ok;this.hidden=true;document.getElementById('test').hidden=data.action!=='confirm';}}catch{{document.getElementById('message').textContent=data.error;this.disabled=false;}}}};
-document.getElementById('test').onclick=async function(){{this.disabled=true;const result=document.getElementById('test-result');result.textContent=data.test_sending;try{{const r=await fetch('/api/v1/alerts/test',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{token}})}});if(r.status===429){{result.textContent=data.test_limit;return;}}if(!r.ok)throw Error();result.textContent=data.test_sent;}}catch{{result.textContent=data.error;}}finally{{this.disabled=false;}}}};</script></html>'''
+<script nonce="{nonce}">const data={payload};const token=location.hash.slice(1);history.replaceState(null,'',location.pathname+location.search);document.getElementById('action').onclick=async function(){{this.disabled=true;try{{const r=await fetch('/api/v1/alerts/'+data.action,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{token}})}});if(!r.ok)throw Error();document.getElementById('message').textContent=data.ok;this.hidden=true;}}catch{{document.getElementById('message').textContent=data.error;this.disabled=false;}}}};
+</script></html>'''
         return HTMLResponse(content, headers={"Content-Security-Policy": f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"})

@@ -78,8 +78,24 @@ class NewsService:
             self.store.cache(key, snapshot)
             return snapshot
 
-    async def report(self, asset):
-        return (await self.snapshot(asset))["report"]
+    @staticmethod
+    def filter_report(report, importance="all"):
+        if importance == "all":
+            return report
+        if importance not in {"high", "medium", "low"}:
+            raise ValueError("Invalid importance")
+        result = deepcopy(report)
+        result["articles"] = [a for a in result["articles"]
+                              if a.get("insight", {}).get("importance", {}).get("level") == importance]
+        result["best_article"] = next(iter(result["articles"]), None)
+        result["status"] = "ok" if result["best_article"] else "no_relevant_news"
+        result["importance"] = importance
+        result["stats"]["unique"] = len(result["articles"])
+        result["report_id"] = hashlib.sha256((report["report_id"] + ":" + importance).encode()).hexdigest()[:24]
+        return result
+
+    async def report(self, asset, importance="all"):
+        return self.filter_report((await self.snapshot(asset))["report"], importance)
 
     async def history(self, asset=None, importance="all"):
         """Read public, archived stories; today's content is never returned here.
@@ -134,14 +150,14 @@ class NewsService:
                 "has_more": len(articles) > 200, "limit": 200,
                 "articles": [a for _, a in articles[:200]]}
 
-    async def preview(self, asset):
+    async def preview(self, asset, importance="all"):
         snapshot = await self.snapshot(asset)
-        report = snapshot["report"]
+        report = self.filter_report(snapshot["report"], importance)
         # Strict UTC boundary: no current/future headline, summary or signal in public previews.
         fields = ("id", "title", "source", "published_at")
         today = datetime.now(timezone.utc).date()
         history = [a for a in snapshot["latest"] if parse_date(a["published_at"]).date() < today][:10]
-        return {"symbol": asset["symbol"], "name": asset["name"],
+        return {"symbol": asset["symbol"], "name": asset["name"], "importance": importance,
                 "status": "available" if report["best_article"] else "no_today_news",
                 "has_today_news": bool(report["best_article"]), "day_utc": report["day_utc"],
                 "checked_at": report["generated_at"], "latest_window_days": 7,

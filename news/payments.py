@@ -6,9 +6,12 @@ are held for operator reconciliation, never automatically charged again.
 import asyncio
 import base64
 from copy import deepcopy
+from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
 import json
+import logging
 import re
 from algosdk import encoding, transaction
 from nacl.signing import VerifyKey
@@ -17,6 +20,8 @@ from fastapi.responses import JSONResponse
 import httpx
 from x402.schemas import PaymentPayload, PaymentRequirements
 from x402.extensions.bazaar import declare_discovery_extension
+
+LOG = logging.getLogger("tradingnews.payments")
 
 
 def encoded(data):
@@ -146,8 +151,70 @@ class PaymentGateway:
             return JSONResponse(body, headers={"PAYMENT-RESPONSE": encoded(receipt), "Cache-Control": "no-store"})
         if row["state"] == "invalid":
             raise HTTPException(403, "PAYMENT_REJECTED")
+        if row["state"] == "expired":
+            raise HTTPException(410, "PAYMENT_EXPIRED_NO_CHARGE")
         raise HTTPException(409, {"code": "PAYMENT_PENDING_RECONCILIATION", "state": row["state"],
                                   "message": "Do not create a new payment. Recover the same request or reconcile its on-chain receipt."})
+
+    async def status(self, token):
+        """Reconcile the same signed transfer without ever submitting it again.
+
+        Only an indexer response past LastValid, with no matching transaction,
+        proves it is safe to release an expired purchase. A timeout, a lagging
+        indexer, or an algod 404 alone is not proof that no payment occurred.
+        """
+        cfg = self.settings
+        payload, fingerprint, proof = decode_payment(token)
+        row = self.store.payment(fingerprint)
+        resource = payload.get("resource", {}).get("url")
+        if row and (not hmac.compare_digest(row["proof"], proof) or row["resource"] != resource):
+            raise HTTPException(403, "PAYMENT_PROOF_MISMATCH")
+        # A price change must not prevent recovery of a previously signed purchase.
+        try:
+            original_price = format(Decimal(payload["accepted"]["amount"]) / 1_000_000, "f")
+        except (KeyError, InvalidOperation, ValueError):
+            raise HTTPException(400, "INVALID_PAYMENT_TRANSACTION") from None
+        txn, _ = validate_transfer(payload, replace(cfg, price_usdc=original_price), payload["accepted"])
+        txid = txn.get_txid()
+        result = {"transaction": txid, "can_retry": False, "state": "unknown"}
+
+        def confirmed():
+            if not row:
+                return {**result, "state": "confirmed_without_report"}
+            receipt = {"success": True, "network": cfg.network, "transaction": txid, "payer": txn.sender}
+            self.store.payment_state(fingerprint, "settled", receipt)
+            return {**result, "state": "settled"}
+
+        if row and row["state"] == "settled":
+            return {**result, "state": "settled"}
+        try:
+            response = await self.http.get(
+                f"https://{cfg.network_name}-api.algonode.cloud/v2/transactions/pending/{txid}", timeout=10)
+            if response.status_code == 200 and response.json().get("confirmed-round", 0) > 0:
+                return confirmed()
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            pass
+        try:
+            response = await self.http.get(f"https://{cfg.network_name}-idx.algonode.cloud/v2/transactions",
+                                           params={"txid": txid}, timeout=12)
+            response.raise_for_status()
+            indexed = response.json()
+            transactions = indexed.get("transactions")
+            current_round = indexed.get("current-round")
+            if isinstance(transactions, list):
+                if any(t.get("id") == txid and t.get("confirmed-round", 0) > 0 for t in transactions):
+                    return confirmed()
+                if not transactions and type(current_round) is int and current_round > txn.last_valid_round:
+                    # Recheck in case a concurrent recovery just stored the receipt.
+                    latest = self.store.payment(fingerprint)
+                    if latest and latest["state"] == "settled":
+                        return {**result, "state": "settled"}
+                    if row:
+                        self.store.payment_state(fingerprint, "expired")
+                    return {**result, "state": "expired_not_paid", "can_retry": True}
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            pass
+        return result
 
     async def access(self, token, resource, make_body):
         cfg = self.settings
@@ -157,7 +224,7 @@ class PaymentGateway:
         if token:
             payload, fingerprint, proof = decode_payment(token)
             row = self.store.payment(fingerprint)
-            if row and row["state"] not in {"settled", "invalid"} and row["resource"] == resource and hmac.compare_digest(row["proof"], proof):
+            if row and row["state"] not in {"settled", "invalid", "expired"} and row["resource"] == resource and hmac.compare_digest(row["proof"], proof):
                 # A lost facilitator response must never trigger a second settlement.
                 txn = encoding.msgpack_decode(payload["payload"]["paymentGroup"][payload["payload"]["paymentIndex"]]).transaction
                 try:
@@ -186,9 +253,14 @@ class PaymentGateway:
             response = await self.http.post(cfg.facilitator + "/verify", json=request_body, timeout=15)
             response.raise_for_status()
             verification = response.json()
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError) as exc:
+            LOG.warning("Payment verification unavailable tx=%s error=%s http=%s", txn.get_txid(),
+                        type(exc).__name__, getattr(getattr(exc, "response", None), "status_code", "-"))
             raise HTTPException(503, "VERIFICATION_UNAVAILABLE_NO_SETTLEMENT") from None
         if not isinstance(verification, dict) or verification.get("isValid") is not True:
+            reason = verification.get("invalidReason", "unknown") if isinstance(verification, dict) else "invalid_response"
+            safe_reason = reason if isinstance(reason, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", reason) else "unspecified"
+            LOG.warning("Payment verification rejected tx=%s reason=%s", txn.get_txid(), safe_reason)
             raise HTTPException(403, "FACILITATOR_REJECTED_PAYMENT")
         # Fetch before payment: failures and empty results must not trigger settlement.
         body = await make_body()
@@ -202,9 +274,12 @@ class PaymentGateway:
             response.raise_for_status()
             receipt = response.json()
             if not isinstance(receipt, dict) or receipt.get("success") is not True or not re.fullmatch(r"[A-Z2-7]{52}", str(receipt.get("transaction", ""))) or receipt.get("network") != cfg.network or receipt["transaction"] not in txids:
+                LOG.warning("Payment settlement unconfirmed tx=%s", txn.get_txid())
                 self.store.payment_state(fingerprint, "settlement_unconfirmed")
                 raise HTTPException(502, "SETTLEMENT_UNCONFIRMED_RECOVER_OR_RECONCILE")
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError) as exc:
+            LOG.warning("Payment settlement unknown tx=%s error=%s http=%s", txn.get_txid(),
+                        type(exc).__name__, getattr(getattr(exc, "response", None), "status_code", "-"))
             self.store.payment_state(fingerprint, "settlement_unknown")
             raise HTTPException(502, "SETTLEMENT_UNKNOWN_RECOVER_OR_RECONCILE") from None
         self.store.payment_state(fingerprint, "settled", receipt)
