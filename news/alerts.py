@@ -36,6 +36,8 @@ COPY = {
         "action": "Select the button to continue.",
         "all": "all coins",
         "importance_note": "The icon shows the highest importance among newly detected stories for each coin.",
+        "filter": "Importance filter: {importance}",
+        "all_importance": "All importance levels",
         "high": "🔴 Very important",
         "medium": "🟠 Important",
         "low": "🟡 Less important",
@@ -56,6 +58,8 @@ COPY = {
         "action": "Pulsa el botón para continuar.",
         "all": "todas las monedas",
         "importance_note": "El icono indica la mayor importancia de las noticias nuevas detectadas para cada moneda.",
+        "filter": "Filtro de importancia: {importance}",
+        "all_importance": "Todas las importancias",
         "high": "🔴 Muy importante",
         "medium": "🟠 Importante",
         "low": "🟡 Menos importante",
@@ -76,6 +80,8 @@ COPY = {
         "action": "Cliquez sur le bouton pour continuer.",
         "all": "toutes les monnaies",
         "importance_note": "L’icône indique l’importance maximale des nouvelles actualités détectées pour chaque monnaie.",
+        "filter": "Filtre d’importance : {importance}",
+        "all_importance": "Tous les niveaux d’importance",
         "high": "🔴 Très importante",
         "medium": "🟠 Importante",
         "low": "🟡 Moins importante",
@@ -96,6 +102,8 @@ COPY = {
         "action": "Klicken Sie zum Fortfahren auf die Schaltfläche.",
         "all": "alle Kryptowährungen",
         "importance_note": "Das Symbol zeigt die höchste Bedeutung der neu erkannten Nachrichten je Kryptowährung.",
+        "filter": "Wichtigkeitsfilter: {importance}",
+        "all_importance": "Alle Wichtigkeitsstufen",
         "high": "🔴 Sehr wichtig",
         "medium": "🟠 Wichtig",
         "low": "🟡 Weniger wichtig",
@@ -146,6 +154,12 @@ class Alerts:
                     state TEXT NOT NULL, updated REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 1,
                     PRIMARY KEY(subscription_id,article_id));
             """)
+            # Existing subscribers retain all importance levels. No database reset.
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(news_subscriptions)")}
+            if "importance" not in columns:
+                db.execute("ALTER TABLE news_subscriptions ADD COLUMN importance TEXT NOT NULL DEFAULT 'all'")
+            if "pending_preferences" not in columns:
+                db.execute("ALTER TABLE news_subscriptions ADD COLUMN pending_preferences TEXT")
 
     def url(self, action, token, language):
         # Fragment keeps the bearer token out of ordinary HTTP access logs.
@@ -170,22 +184,33 @@ class Alerts:
                 raise HTTPException(429, "EMAIL_LIMIT")
             await asyncio.to_thread(self.send_smtp, recipient, subject, body)
 
-    async def subscribe(self, email, symbol, language, client):
+    async def subscribe(self, email, symbol, language, client, importance="all"):
         if not self.enabled:
             raise HTTPException(503, "EMAIL_NOT_CONFIGURED")
         try:
             email = normalize_email(email)
         except ValueError:
             raise HTTPException(422, "INVALID_EMAIL") from None
-        if (symbol not in ASSETS and symbol != "ALL") or language not in COPY:
+        if (symbol not in ASSETS and symbol != "ALL") or language not in COPY or importance not in {"all", "high", "medium", "low"}:
             raise HTTPException(422, "INVALID_SUBSCRIPTION")
         now = time.time()
+        def already_requested(row):
+            if not row:
+                return False
+            if row["confirmed"] and row["importance"] == importance and row["language"] == language:
+                return True
+            return bool((not row["confirmed"] or row["pending_preferences"]) and now - row["confirmation_at"] < 3600)
+
+        def covered_by_all(db):
+            return symbol != "ALL" and db.execute("""SELECT 1 FROM news_subscriptions
+                WHERE email=? AND symbol='ALL' AND confirmed=1 AND importance IN ('all',?)""", (email, importance)).fetchone()
+
         with self.store.connect() as db:
-            if db.execute("SELECT 1 FROM news_subscriptions WHERE email=? AND symbol='ALL' AND confirmed=1", (email,)).fetchone():
+            if covered_by_all(db):
                 return {"status": "confirmation_requested"}
             previous = db.execute("SELECT * FROM news_subscriptions WHERE email=? AND symbol=?", (email, symbol)).fetchone()
             # No change of an existing verified subscription by an unauthenticated visitor.
-            if previous and (previous["confirmed"] or now - previous["confirmation_at"] < 3600):
+            if already_requested(previous):
                 return {"status": "confirmation_requested"}
         if not self.store.budget("alert_signup_ip:" + digest(client), 10) or not self.store.budget("alert_signup_email:" + digest(email), 3):
             raise HTTPException(429, "EMAIL_LIMIT")
@@ -193,26 +218,29 @@ class Alerts:
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             # Recheck after acquiring the lock for simultaneous requests.
-            if db.execute("SELECT 1 FROM news_subscriptions WHERE email=? AND symbol='ALL' AND confirmed=1", (email,)).fetchone():
+            if covered_by_all(db):
                 return {"status": "confirmation_requested"}
             previous = db.execute("SELECT * FROM news_subscriptions WHERE email=? AND symbol=?", (email, symbol)).fetchone()
-            if previous and (previous["confirmed"] or now - previous["confirmation_at"] < 3600):
+            if already_requested(previous):
                 return {"status": "confirmation_requested"}
             if not previous and db.execute("SELECT COUNT(*) FROM news_subscriptions").fetchone()[0] >= 10000:
                 raise HTTPException(503, "EMAIL_LIMIT")
             db.execute("""INSERT INTO news_subscriptions
-                (email,symbol,language,confirm_hash,unsubscribe_token,created,confirmation_at)
-                VALUES (?,?,?,?,?,?,?) ON CONFLICT(email,symbol) DO UPDATE SET
-                language=excluded.language,confirm_hash=excluded.confirm_hash,confirmation_at=excluded.confirmation_at""",
-                (email, symbol, language, digest(token), secrets.token_urlsafe(32), now, now))
+                (email,symbol,language,confirm_hash,unsubscribe_token,created,confirmation_at,importance,pending_preferences)
+                VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(email,symbol) DO UPDATE SET
+                confirm_hash=excluded.confirm_hash,confirmation_at=excluded.confirmation_at,
+                pending_preferences=excluded.pending_preferences""",
+                (email, symbol, language, digest(token), secrets.token_urlsafe(32), now, now, importance,
+                 json.dumps({"importance": importance, "language": language})))
         copy = COPY[language]
         scope = copy["all"] if symbol == "ALL" else symbol
-        body = copy["confirm_body"].format(symbol=scope) + "\n\n" + self.url("confirm", token, language) + "\n\n" + copy["privacy"]
+        filter_label = copy["filter"].format(importance=copy["all_importance" if importance == "all" else importance])
+        body = copy["confirm_body"].format(symbol=scope) + "\n\n" + filter_label + "\n\n" + self.url("confirm", token, language) + "\n\n" + copy["privacy"]
         try:
             await self.send(email, copy["confirm"] + " · " + scope, body)
         except Exception as exc:
             with self.store.connect() as db:
-                db.execute("UPDATE news_subscriptions SET confirmation_at=0 WHERE confirm_hash=? AND confirmed=0", (digest(token),))
+                db.execute("UPDATE news_subscriptions SET confirmation_at=0 WHERE confirm_hash=?", (digest(token),))
             LOG.warning("Confirmation email failed (%s)", type(exc).__name__)
             raise HTTPException(503, "EMAIL_UNAVAILABLE") from None
         return {"status": "confirmation_requested"}
@@ -223,8 +251,9 @@ class Alerts:
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM news_subscriptions WHERE confirm_hash=?", (digest(token),)).fetchone()
-            if not row or (not row["confirmed"] and time.time() - row["confirmation_at"] > 86400):
+            if not row or ((not row["confirmed"] or row["pending_preferences"]) and time.time() - row["confirmation_at"] > 86400):
                 raise HTTPException(400, "INVALID_ALERT_LINK")
+            preferences = json.loads(row["pending_preferences"]) if row["pending_preferences"] else {"importance": row["importance"], "language": row["language"]}
             if row["symbol"] == "ALL":
                 # A verified ALL subscription replaces individual subscriptions.
                 # Carry over delivery history so widening the scope doesn't repeat alerts.
@@ -236,7 +265,9 @@ class Alerts:
                                    (row["id"], key, old["state"], old["updated"], old["attempts"]))
                     db.execute("DELETE FROM news_alert_deliveries WHERE subscription_id=?", (other["id"],))
                     db.execute("DELETE FROM news_subscriptions WHERE id=?", (other["id"],))
-            db.execute("UPDATE news_subscriptions SET confirmed=1 WHERE id=?", (row["id"],))
+            db.execute("""UPDATE news_subscriptions SET confirmed=1,importance=?,language=?,
+                pending_preferences=NULL,last_checked=0 WHERE id=?""",
+                (preferences["importance"], preferences["language"], row["id"]))
         return {"status": "confirmed"}
 
     def unsubscribe(self, token):
@@ -250,7 +281,9 @@ class Alerts:
     def mail_content(self, subscription, levels):
         copy = COPY[subscription["language"]]
         symbols = sorted(levels)
-        lines = [copy["intro"], "", copy["importance_note"], ""]
+        importance = subscription.get("importance", "all")
+        lines = [copy["intro"], "", copy["filter"].format(importance=copy["all_importance" if importance == "all" else importance]),
+                 copy["importance_note"], ""]
         for symbol in symbols:
             web = self.cfg.web_url + "/?" + urlencode({"asset": symbol, "lang": subscription["language"]})
             lines.extend([symbol + " · " + ASSETS[symbol]["name"] + " — " + copy[levels[symbol]],
@@ -265,8 +298,12 @@ class Alerts:
         now = time.time()
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if not db.execute("SELECT 1 FROM news_subscriptions WHERE id=? AND confirmed=1", (subscription["id"],)).fetchone():
+            current = db.execute("SELECT * FROM news_subscriptions WHERE id=? AND confirmed=1", (subscription["id"],)).fetchone()
+            if not current:
                 return
+            subscription = dict(current)
+            all_scope = db.execute("SELECT importance FROM news_subscriptions WHERE email=? AND symbol='ALL' AND confirmed=1",
+                                   (subscription["email"],)).fetchone() if subscription["symbol"] != "ALL" else None
             seen = {r["article_id"]: r for r in db.execute("SELECT * FROM news_alert_deliveries WHERE subscription_id=?", (subscription["id"],))}
             fresh = []
             instant = datetime.now(timezone.utc)
@@ -277,6 +314,12 @@ class Alerts:
                 for article in report["articles"]:
                     published = parse_date(article.get("published_at"))
                     if published is None or published.date() != today or published > instant:
+                        continue
+                    insight = article.get("insight") or build_insight(article, ASSETS[symbol])
+                    level = insight.get("importance", {}).get("level", "unknown")
+                    if subscription["importance"] != "all" and level != subscription["importance"]:
+                        continue
+                    if all_scope and all_scope["importance"] in {"all", level}:
                         continue
                     key = symbol + ":" + article["id"] if subscription["symbol"] == "ALL" else article["id"]
                     if key not in seen or (seen[key]["state"] == "retry" and seen[key]["attempts"] < 3):
