@@ -1,159 +1,192 @@
 # Trading News — Backend
 
-Pay-per-report news intelligence for 49 crypto assets, delivered through an x402 v2 API on Algorand.
+Explainable crypto news reports for people and software agents, purchased with USDC on Algorand through x402 v2.
 
-The service retrieves today's news, removes duplicates, ranks relevant stories and returns source links, publication dates and an explanation of the selection. Version 5.2 orders news entirely with explainable rules. It makes no OpenAI requests and generates no BUY / SELL / HOLD recommendation.
+The API covers 49 assets. It retrieves news from NewsAPI and GNews, removes duplicate coverage, ranks relevant stories, and explains the selection. Each story includes its source, publication date, importance and an indicative BUY / SELL / HOLD interpretation. The engine uses deterministic rules and makes no OpenAI requests.
 
-- API base URL: https://x402-trading-news.onrender.com
-- API documentation: https://x402-trading-news.onrender.com/docs
-- Frontend repository: https://github.com/x402nidia-sudo/x402nidia-sudo-trading-news-web
+This README describes backend **5.7.0** and the matching website.
 
-## Version requirement
+| Resource | Link |
+|---|---|
+| Website | [trading-news-web.onrender.com](https://trading-news-web.onrender.com/) |
+| API | [x402-trading-news.onrender.com](https://x402-trading-news.onrender.com/) |
+| API for agents | [Interactive documentation](https://x402-trading-news.onrender.com/docs) |
+| Frontend repository | [x402nidia-sudo-trading-news-web](https://github.com/x402nidia-sudo/x402nidia-sudo-trading-news-web) |
 
-This README documents the **5.2 rules-only update**. Extract `backend_sin_openai.zip` at the root of `x402nidia-sudo/X402-Trading-news`, replacing `main.py`, `news/config.py`, `news/providers.py`, `news/ranking.py`, `news/service.py` and `README.md`. Keep all other existing application files. Delete the obsolete `news/ai.py`; it is no longer imported. Apply the matching frontend update. Do not delete the database or persistent disk.
+## What the service delivers
 
-After deployment, `/health` must identify version `5.2.0`. `/api/v1/config` must include `selection_method: "rules"`, `ai_enabled: false`, `price_atomic` and only the NewsAPI/GNews providers.
+- A paid report for one selected asset and importance filter: all, red, orange or yellow.
+- Today's matching stories, ordered by relevance, with the highest-ranked story first.
+- Explainable scores, selection reasons, source dates and provider availability.
+- Generated HTML news cards with extracted key points, importance, an indicative signal and the original source link.
+- Free availability checks before purchase, without revealing today's headlines or summaries.
+- Free previously collected news from the last seven days, strictly excluding today.
+- Confirmed email subscriptions for one coin or all coins, with an independent importance filter.
+- Persistent payment records and purchased reports, plus read-only checks for interrupted payments.
 
-## How it works
+All report-day boundaries use **UTC**. English, Spanish, French and German are supported by the website and explanatory text. Headlines and excerpts remain in their source language.
 
-1. Select an asset from the existing 49-symbol catalog.
-2. The backend queries the configured NewsAPI and/or GNews providers.
-3. It keeps relevant news published today in UTC, groups duplicate coverage and calculates an explainable priority score.
-4. The highest-scoring article leads the report. Every article includes the five score components and its selection reasons. Equal scores are resolved by newest publication date, then URL.
-5. The customer authorizes an Algorand USDC payment. The backend verifies and settles it through the facilitator before releasing the report.
-6. The purchased report and payment receipt are stored in SQLite. Reusing the same signed request recovers that purchase without a second settlement.
+## How news is ranked
 
-The default report price is **0.199 USDC**, configurable through `PRICE_USDC`. No customer seed phrase or private key is required by the server.
+NewsAPI and GNews retrieve articles. Local rules filter asset matches, reject invalid or unsuitable items, group duplicate headlines and assign a score out of 100:
 
-## Repository files
+| Component | Maximum points |
+|---|---:|
+| Asset relevance | 35 |
+| Recency | 25 |
+| Predefined source priority | 15 |
+| Event importance | 15 |
+| Similar coverage across publisher domains | 10 |
+
+Ties use the newest publication date, then URL. Speculative headlines receive a reduced event score. Source weights are editorial priorities; they do not verify an article's accuracy. Coverage from multiple domains does not prove independent confirmation.
+
+Importance is classified separately as **red / high**, **orange / medium**, or **yellow / low**. Selecting a color matches that exact category, not that category and everything above it.
+
+BUY / SELL / HOLD is an indicative **per-story** interpretation of the available headline and excerpt. Uncertainty, conflicting evidence or weak attribution generally produces HOLD. Extracted key points come from provider text; the engine does not read and summarize the full publisher article, analyze charts or forecast returns.
+
+**Current limitation:** new reports have `assessment: null` and `recommendation: null` at report level. Per-story results are in `articles[].insight.recommendation`. Version 5.7 does not calculate a combined BUY / SELL / HOLD assessment for the whole report.
+
+The Guardian API, GDELT and OpenAI are not integrated in this version. NewsAPI or GNews may still return an article published by The Guardian.
+
+## Price and x402 payments
+
+The configured report price is **0.2 USDC** (`PRICE_USDC=0.2`), equivalent to **200000 atomic units**. This USDC amount is transferred to `PAYTO_ADDRESS`. The implementation does not split it into 0.199 USDC plus a 0.001 USDC contest fee.
+
+Algorand network fees are separate and denominated in ALGO. The checkout uses sponsorship when the facilitator advertises a fee payer; otherwise it displays the customer's network fee before signing. The x402 integration includes `x402-global-challenge` metadata. Confirm attribution in the merchant dashboard after a successful real settlement.
+
+The existing 49 registered base routes remain `/api/v1/market-signal/{symbol}`. A filtered purchase uses the canonical URL returned by checkout, for example `/api/v1/market-signal/BTC?importance=high`. For all importance levels, omit the query string.
+
+1. The client checks news availability and requests the paid resource.
+2. The API returns HTTP 402 and payment requirements.
+3. An Algorand-capable client signs the advertised payment and repeats the same request with `PAYMENT-SIGNATURE`.
+4. The backend verifies the payment, prepares the report and settles through the facilitator.
+5. A successful response includes the report, `PAYMENT-RESPONSE` and `billing.receipt`.
+
+The backend checks for usable matching news before settlement. It does not settle payment for an empty report or when all sources are unavailable. Partial provider coverage is explicitly identified.
+
+The same signed request retrieves an already stored purchase without another settlement. An uncertain payment must be reconciled before preparing a replacement. The website performs read-only status checks automatically; there is no manual Recover button in the current UI.
+
+Only Algorand USDC is accepted by this checkout. Cross-chain conversion and card payments are not implemented. Customer seeds and private keys never belong in backend configuration.
+
+## Essential application files
 
 | Location | Purpose |
 |---|---|
-| `main.py` | FastAPI application, routes and deployment checks |
-| `requirements.txt` | Pinned Python dependencies |
-| `assets.json` | Existing 49-symbol catalog |
-| `news/config.py`, `news/catalog.py` | Environment configuration and asset lookup |
-| `news/providers.py`, `news/ranking.py` | News retrieval, relevance, dates and deduplication |
-| `news/service.py` | Rule-based report orchestration and cache |
-| `news/checkout.py`, `news/payments.py` | Unsigned payment preparation, x402 verification and settlement |
-| `news/storage.py`, `news/__init__.py` | Durable storage and package initialization |
+| `main.py` | FastAPI routes, lifecycle and deployment checks |
+| `requirements.txt` | Python dependencies |
+| `assets.json` | 49-asset catalog |
+| `news/__init__.py`, `news/config.py`, `news/catalog.py` | Package, settings and asset lookup |
+| `news/providers.py`, `news/ranking.py`, `news/service.py` | Retrieval, ranking, reports and history |
+| `news/insights.py` | Importance, per-story signals and HTML cards |
+| `news/checkout.py`, `news/payments.py` | Payment preparation, x402 settlement and reconciliation |
+| `news/storage.py`, `news/alerts.py` | SQLite persistence and email alerts |
 
-Upload the complete `news/` package alongside the three root application files. The website is deployed from its separate repository.
+The complete `news/` package is required. Keep `.gitignore` to exclude local secrets and runtime data. `README.md` documents the application. The frontend lives in its separate repository. Do not upload `.env`, database files, virtual environments or `__pycache__`.
 
-## Configure the existing Render service
+## Render configuration
 
-Keep the existing service to preserve its registered API URLs:
+Use the existing backend Web Service so its public API URL remains unchanged. The website must be deployed separately as a Static Site.
 
-https://dashboard.render.com/web/srv-d9pd8t8ae00c73eqchog
-
-The previous application used **Node**. This backend requires the **Python 3** runtime.
-
-1. Temporarily set Auto-Deploy to **Off** while uploading the update and configuring the service.
-2. Configure the environment variables below. Use **Save only**, if offered, until the remaining settings are ready.
-3. Change the instance to a paid instance type, the 7 USD/month, 0.5 CPU / 512 MB option shown in the dashboard, and attach a persistent disk at `/var/data`. A 1 GB disk is an initial option; review the price shown in Render before confirming. This code requires that mount when payments are enabled.
-4. Open **Settings → Build → Source → Edit**. Select `x402nidia-sudo/X402-Trading-news` again, even if the same repository name was previously connected. This reconnects the current source after a repository replacement.
-5. Set the following fields in the source/settings form:
-
-| Render field | Value |
+| Setting | Value |
 |---|---|
 | Repository | `https://github.com/x402nidia-sudo/X402-Trading-news` |
 | Branch | `main` |
-| Runtime | `Python 3` |
-| Root Directory | Leave empty |
+| Runtime | Python 3 |
+| Root Directory | Empty |
 | Build Command | `pip install -r requirements.txt` |
-| Start Command | `uvicorn main:production_app --factory --host 0.0.0.0 --port $PORT --workers 1` |
+| Start Command | `python -m uvicorn main:production_app --factory --host 0.0.0.0 --port $PORT --workers 1` |
 | Health Check Path | `/health` |
+| Persistent disk mount | `/var/data` |
 
-6. Click **Deploy** in Update Source. If another deployment is needed after adjusting the settings, use **Manual Deploy → Clear build cache & deploy** to build the latest commit with the new configuration. Do not select a deleted historical commit.
-7. Once checks pass, use **On Commit** for automatic deployment if desired. This repository does not include a CI workflow, so do not select **After CI Checks Pass** unless you add one.
-
-The existing service keeps its URL when its source/runtime is updated. A historical commit link can return 404 after the old repository history is deleted; the new deployment must use the current `main` branch.
-
-If the repository is missing from Render's selector, configure the [Render GitHub app](https://github.com/apps/render/installations/new) for the `x402nidia-sudo` account and grant access to the new repositories.
+Use one instance and one application worker. On Render, enabled payments require the actual persistent disk to be mounted at `/var/data`; setting a path alone does not attach a disk. Preserve the existing database path when updating an installation.
 
 ### Backend environment variables
 
-Configure these in the backend service's **Environment** page. Values are strings; use `true`/`false` for booleans and a decimal point for the price.
-
 | Variable | Value / purpose |
 |---|---|
-| `PYTHON_VERSION` | `3.12.12` |
 | `DEMO_MODE` | `false` |
 | `PAYMENTS_ENABLED` | `true` |
 | `PUBLIC_BASE_URL` | `https://x402-trading-news.onrender.com` |
+| `WEB_BASE_URL` | `https://trading-news-web.onrender.com` — links in email and news cards |
+| `WEB_ORIGINS` | `https://trading-news-web.onrender.com` — exact allowed browser origin |
 | `ALGORAND_NETWORK` | `mainnet` |
-| `PAYTO_ADDRESS` | `EH5BHWISPB7MEIITJIWF2VB3YFN2RZLJMWBRV6CBJV76FBAEAALL6XKSQE` — public receiving address pinned by the supplied frontend |
-| `PRICE_USDC` | `0.199` — up to six decimal places |
+| `PAYTO_ADDRESS` | `EH5BHWISPB7MEIITJIWF2VB3YFN2RZLJMWBRV6CBJV76FBAEAALL6XKSQE` |
+| `PRICE_USDC` | `0.2` — use a decimal point |
 | `FACILITATOR_URL` | `https://facilitator.goplausible.xyz` |
-| `DATABASE_PATH` | `/var/data/trading-news.sqlite3` |
-| `WEB_ORIGINS` | The actual frontend origin assigned by Render, such as `https://YOUR-WEB-SITE.onrender.com`; replace the example |
-| `NEWSAPI_KEY` | Your NewsAPI key, if using NewsAPI |
-| `GNEWS_API_KEY` | Your GNews key, if using GNews |
+| `DATABASE_PATH` | `/var/data/trading-news.sqlite3`, or the existing database filename under that mount |
+| `NEWSAPI_KEY` | Your NewsAPI key, if using this provider |
+| `GNEWS_API_KEY` | Your GNews key, if using this provider |
+| `EMAIL_REMITENTE` | Sending Gmail address, required for alerts |
+| `EMAIL_PASSWORD` | Gmail app password for that address, required for alerts |
+| `ALERT_INTERVAL_HOURS` | `0.5` — thirty minutes |
 
-At least one news provider must have a working key. Both can be enabled. NewsAPI and GNews retrieve news; local rules rank their results. The Guardian API is not used. Remove obsolete Guardian variables. You can also remove `AI_RERANK`, `OPENAI_API_KEY`, `OPENAI_MODEL` and `AI_DAILY_LIMIT`: version 5.2 ignores them, even if they remain configured.
+At least one news provider needs a valid key and sufficient quota. Keep secrets exclusively in backend environment variables. `AI_RERANK`, `OPENAI_API_KEY`, `OPENAI_MODEL` and `AI_DAILY_LIMIT` are unused and can be removed. No additional environment variable is needed for subscription importance.
 
-Keep API keys in Render. Do not commit them to either repository or put them in browser JavaScript. News providers have their own plan and commercial-use requirements; removing OpenAI does not remove these. See [NewsAPI pricing](https://newsapi.org/pricing) and [GNews pricing](https://gnews.io/pricing).
+Optional defaults: `CACHE_SECONDS=900`, `MAX_AGE_HOURS=24`, `NEWS_LANGUAGE=en`, `NEWSAPI_DAILY_LIMIT=90`, `GNEWS_DAILY_LIMIT=90`, `REQUESTS_PER_MINUTE=60`. Retrieval language accepts `en`, `es` or `all`; it is independent of the interface language. Production reports remain limited to today's UTC news.
 
-Optional limits retain these defaults: `CACHE_SECONDS=900`, `MAX_AGE_HOURS=24`, `NEWS_LANGUAGE=en`, `NEWSAPI_DAILY_LIMIT=90`, `GNEWS_DAILY_LIMIT=90`, `REQUESTS_PER_MINUTE=60`. These are application limits, not guarantees about a provider subscription. `NEWS_LANGUAGE` controls retrieval language (`en`, `es` or `all`), independently of the frontend interface language.
+`WEB_ORIGINS` supports comma-separated exact origins. Do not use `*`, paths or a trailing slash. Changing `PAYTO_ADDRESS` also requires updating and rebuilding the frontend's pinned payment validation.
 
-Use the actual frontend origin in `WEB_ORIGINS`, without a trailing slash or path. Multiple origins are comma-separated. Wildcard `*` is rejected. While the website is not yet deployed, the API can start with only the existing local defaults; add the final website origin before enabling browser purchases.
+### Email alerts
 
-Run **one application worker and one instance**. The SQLite database stores payment state and purchased responses. This implementation cannot run enabled payments on Render's Free instance without its required persistent disk.
+An asynchronous task runs inside the backend process while email credentials are configured. A separate AI agent or Render Cron Job is not required.
 
-## API for agents
+Users select a coin, choose that coin or all coins, select an importance level and enter their email. The subscription only becomes active after email confirmation. Preference changes also require confirmation; existing preferences remain active until then.
 
-| Method | Path | Result |
+The task checks due subscriptions approximately every thirty minutes and queries their assets. An all-coins subscription includes the full catalog. Checks share cached results and respect provider limits; an outage or exhausted quota can delay coverage. The default 90 requests per provider per day is not enough to guarantee fresh queries for all 49 assets every thirty minutes. Adjust application limits and provider plans to the intended workload.
+
+Notifications identify only the coin or coins, importance icons and a link to the website to buy the report. They do not reveal headlines, excerpts or publisher links. Delivery records suppress repeat alerts for already notified stories. Emails include an unsubscribe link.
+
+Subscription addresses, coin scope, language, importance, confirmation state and pending preferences are stored in the SQLite table `news_subscriptions`. Delivery tracking is in `news_alert_deliveries`, in the same file configured by `DATABASE_PATH` on the persistent disk. Treat this database as private data and preserve it across deployments.
+
+## API reference
+
+| Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | Application status, version and payment flag |
-| GET | `/api/v1/config` | Public payment configuration; no API keys |
-| GET | `/api/v1/assets` | Supported asset catalog |
-| GET | `/api/v1/market-signal/{symbol}` | HTTP 402 challenge, or the paid report after successful settlement |
-| POST | `/api/v1/checkout/{symbol}` | Unsigned wallet transaction quote; JSON body: `{"address":"YOUR_ALGORAND_ADDRESS"}` |
-| GET | `/.well-known/x402.json` | Discovery manifest and the existing resource URLs |
+| GET | `/health` | Liveness, version and payment flag |
+| GET | `/api/v1/config` | Public configuration; no provider or SMTP secrets |
+| GET | `/api/v1/assets` | Asset catalog |
+| GET | `/api/v1/news/{symbol}` | Today's availability and previous news; optional `importance` |
+| GET | `/api/v1/history` | Collected archive; `symbol=ALL` or an asset, plus `importance` |
+| POST | `/api/v1/checkout/{symbol}` | Unsigned quote; body `{"address":"YOUR_ALGORAND_ADDRESS"}`; optional `importance` |
+| GET | `/api/v1/market-signal/{symbol}` | HTTP 402 challenge or purchased report; canonical importance query |
+| POST | `/api/v1/payments/status` | Read-only reconciliation; body `{"signature":"ORIGINAL_PAYMENT_SIGNATURE"}` |
+| GET | `/news/{symbol}/{article_id}` | Generated HTML card; optional `lang` |
+| POST | `/api/v1/alerts/subscribe` | Request a confirmed subscription |
+| POST | `/api/v1/alerts/confirm` | Confirm using the emailed token |
+| POST | `/api/v1/alerts/unsubscribe` | Unsubscribe using the emailed token |
+| GET | `/.well-known/x402.json` | x402 discovery and registered base resources |
 | GET | `/docs` | Interactive API documentation |
 
-The paid resource remains `/api/v1/market-signal/{symbol}`. There is one report purchase; a second news endpoint purchase is not required.
+Subscription body example: `{"email":"reader@example.com","symbol":"BTC","language":"en","importance":"high"}`. Use `"ALL"` for all coins. Confirmation and unsubscribe bodies contain `{"token":"TOKEN_FROM_EMAIL"}`.
 
-An AVM-capable x402 client requests the resource, reads the HTTP 402 challenge, signs the exact advertised payment and repeats the same GET with `PAYMENT-SIGNATURE`. Successful delivery includes the `PAYMENT-RESPONSE` receipt header and `billing.receipt` in the JSON body.
+Reports use schema `2.3`. Important fields include `best_article`, `articles`, `stats`, `providers`, `selection_method`, `day_utc` and `billing`. Each article includes score components and `insight` with importance, recommendation and extracted key points.
 
-New reports use schema `2.2` and include `best_article`, `articles`, `stats`, `providers`, source links, publication dates and `selection_reasons`. Each article contains `score` and `components`. `selection_method` is `rules`, `ai.status` is `disabled`, and `assessment` and `recommendation` are `null`. These compatibility fields do not invoke an AI service. Agents should interpret the result as ranked news, not a trading signal; the registered route name remains unchanged.
+Today's HTML cards require the original proof of a stored purchase containing that article. Opening a card does not initiate payment. Historical cards are public while available; the archive is collected coverage, not a complete historical database.
 
-The maximum score is 100: asset relevance 35, recency 25, predefined source priority 15, event 15, and coverage across domains 10. Speculative headlines reduce the event component. Source weights are editorial priorities, not factual verification; similar coverage does not prove independent confirmation. Selection uses retrieved headlines and excerpts, not full articles.
+### Read-only examples
 
-Only relevant items dated today in UTC are eligible. Missing dates, irrelevant assets and old items are excluded, and duplicate headlines are grouped. The rules are optimized for English and Spanish; they do not translate news content. The website explains the selection in English, Spanish, French and German.
+```bash
+curl -sS https://x402-trading-news.onrender.com/health
+curl -sS https://x402-trading-news.onrender.com/api/v1/config
+curl -sS 'https://x402-trading-news.onrender.com/api/v1/news/BTC?importance=high'
+curl -sS 'https://x402-trading-news.onrender.com/api/v1/history?symbol=ALL&importance=all'
+```
 
-If no provider is available or no relevant news remains, the backend blocks settlement. A failed provider can still yield a report from another available provider, marked as partial coverage. No AI credentials or AI quota are required. `/health` is a liveness check, not verification that external providers or payment settlement work.
+An agent purchasing a report must implement the advertised Algorand x402 signing flow. Opening `/docs` alone does not supply a funded wallet or automatically complete a payment.
 
-## Payment recovery and network fees
+## Local startup
 
-Previously purchased reports remain recoverable as originally stored, including any historical assessment, without an OpenAI call. Unsold caches from earlier versions are not used for new purchases. Keep the exact signed purchase request until its result is known. If the connection is interrupted, repeat that request to recover the stored report. A pending or unknown settlement must be reconciled rather than replaced with another payment.
-
-Algorand network fees are separate from the USDC report price. When the facilitator advertises a fee payer, the sponsored group covers those fees; otherwise the customer's network fee is shown before signing. The application includes `x402-global-challenge` metadata. It does not create a separate contest-fee transfer, and attribution must be checked in the merchant dashboard after a real purchase.
-
-Payment accepts Algorand USDC. Cross-network bridging and automatic token conversion are not included.
-
-## Local API check
-
-With Python 3.12 and an isolated environment:
+From the repository root, using Python 3.12 or a compatible Python environment:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-PAYMENTS_ENABLED=false PUBLIC_BASE_URL=http://127.0.0.1:8000 uvicorn main:production_app --factory --host 127.0.0.1 --port 8000 --workers 1
+PAYMENTS_ENABLED=false PUBLIC_BASE_URL=http://127.0.0.1:8000 python -m uvicorn main:production_app --factory --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-This checks startup and public endpoints without enabling purchases. For Windows, activate `.venv\Scripts\Activate.ps1` and set environment variables using PowerShell syntax. The supplied frontend remains configured for the production API.
+This starts public endpoints with purchases disabled. Real news still requires provider credentials. On Windows, use the equivalent PowerShell environment and activation commands. Leave email credentials unset if testing should not send email.
 
-## Deployment checks
+After deployment, `/health` should identify `5.7.0`; `/api/v1/config` should show `price_usdc: "0.2"`, `price_atomic: "200000"`, `selection_method: "rules"`, `ai_enabled: false` and `alert_importance_enabled: true`. A healthy process does not prove that live news, SMTP, wallet signing or facilitator settlement succeeds. Verify those integrations separately before presenting a successful live purchase.
 
-- `/health` returns HTTP 200 with version `5.2.0`.
-- `/api/v1/config` returns `price_usdc: "0.199"` and `price_atomic: "199000"` at the default price.
-- `/api/v1/assets` returns 49 assets.
-- `/api/v1/market-signal/BTC` without a signature returns HTTP 402 when payments and the facilitator are available.
-- The frontend shows the expected price and recipient, and its origin is allowed by the backend.
-- A deliberate real purchase returns a confirmed receipt; recovering that purchase does not cause a second settlement.
-
-Version 5.2 passed 34 backend checks and 15 JavaScript/UI/wallet checks using simulated providers and payments. No real payment was made. Live API credentials, wallet signing, production settlement and contest attribution require deployment verification.
-
-Render references: [change the source/runtime](https://render.com/docs/native-runtimes#changing-a-services-runtime), [persistent disks](https://render.com/docs/disks), [manual deploys](https://render.com/docs/deploys), [GitHub access](https://render.com/docs/git-provider).
+Reference documentation: [Render FastAPI](https://render.com/docs/deploy-fastapi), [Render disks](https://render.com/docs/disks), [NewsAPI](https://newsapi.org/docs), [GNews](https://docs.gnews.io/), [Pera Connect](https://docs.perawallet.app/references/pera-connect/).
