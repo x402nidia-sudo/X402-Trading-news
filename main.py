@@ -38,6 +38,7 @@ class AlertRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     symbol: str = Field(min_length=1, max_length=12)
     language: Literal["en", "es", "fr", "de"] = "en"
+    importance: Literal["all", "high", "medium", "low"] = "all"
 
 
 class AlertToken(BaseModel):
@@ -67,7 +68,7 @@ def create_app(settings=None, transport=None):
     async def lifespan(app):
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, timeout=15,
                                      limits=httpx.Limits(max_connections=12),
-                                     headers={"User-Agent": "TradingNews/5.6.0"}) as http:
+                                     headers={"User-Agent": "TradingNews/5.7.0"}) as http:
             store = Store(cfg.db_path)
             app.state.store = store
             app.state.news = NewsService(cfg, store, Providers(cfg, store, http), http)
@@ -87,7 +88,7 @@ def create_app(settings=None, transport=None):
                         with suppress(asyncio.CancelledError):
                             await worker
 
-    app = FastAPI(title="Trading News", version="5.6.0", lifespan=lifespan, docs_url=None,
+    app = FastAPI(title="Trading News", version="5.7.0", lifespan=lifespan, docs_url=None,
                   description=f"One asset report for {cfg.price_usdc} USDC via x402 v2 on Algorand. Use /api/v1/market-signal/{{symbol}}. Today's news ordered by explainable rules: asset relevance, recency, source priority, event and coverage. Includes scores, source links and dates. Includes indicative per-story BUY/SELL/HOLD impact signals based on explicit rules, without OpenAI. Free history excludes today. Report days use UTC.")
     app.state.settings = cfg
     rate = OrderedDict()
@@ -143,7 +144,7 @@ def create_app(settings=None, transport=None):
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "5.6.0", "payments_enabled": cfg.payments}
+        return {"status": "ok", "version": "5.7.0", "payments_enabled": cfg.payments}
 
     @app.get("/api/v1/config")
     async def config():
@@ -154,6 +155,7 @@ def create_app(settings=None, transport=None):
                 "providers": [{"name": p, "configured": bool(cfg.provider_keys.get(p))}
                               for p in ("newsapi", "gnews")], "ai_enabled": False,
                 "selection_method": "rules", "email_alerts_enabled": app.state.alerts.enabled,
+                "alert_importance_enabled": True,
                 "alert_interval_minutes": cfg.alert_interval_hours * 60}
 
     @app.get("/api/v1/assets")
@@ -206,7 +208,7 @@ def create_app(settings=None, transport=None):
         check_origin(request)
         symbol = "ALL" if body.symbol == "ALL" else asset_for(body.symbol)["symbol"]
         return await app.state.alerts.subscribe(body.email, symbol, body.language,
-                                                request.client.host if request.client else "unknown")
+                                                request.client.host if request.client else "unknown", body.importance)
 
     @app.post("/api/v1/alerts/confirm")
     async def confirm_alert(body: AlertToken, request: Request):
