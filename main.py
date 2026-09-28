@@ -14,7 +14,7 @@ from news.catalog import ASSETS, get_asset
 from news.config import Settings
 from news.payments import PaymentGateway
 from news.providers import Providers
-from news.service import NewsService, NoProviders
+from news.service import NewsService, NoProviders, AnalysisUnavailable
 from news.storage import Store
 from news.checkout import Checkout
 
@@ -25,7 +25,7 @@ class CheckoutRequest(BaseModel):
 
 def create_app(settings=None, transport=None):
     cfg = settings or Settings.from_env()
-    cfg = replace(cfg, demo=False, price_usdc="0.199", max_age_hours=min(cfg.max_age_hours, 24))
+    cfg = replace(cfg, demo=False, max_age_hours=min(cfg.max_age_hours, 24))
     cfg.validate()
     if os.getenv("RENDER") and cfg.payments:
         if not Path(cfg.db_path).resolve().is_relative_to("/var/data") or not os.path.ismount("/var/data"):
@@ -39,7 +39,7 @@ def create_app(settings=None, transport=None):
     async def lifespan(app):
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, timeout=15,
                                      limits=httpx.Limits(max_connections=12),
-                                     headers={"User-Agent": "TradingNews/5.0"}) as http:
+                                     headers={"User-Agent": "TradingNews/5.1"}) as http:
             store = Store(cfg.db_path)
             app.state.store = store
             app.state.news = NewsService(cfg, store, Providers(cfg, store, http), http)
@@ -47,8 +47,8 @@ def create_app(settings=None, transport=None):
             app.state.checkout = Checkout(cfg, http, app.state.payments)
             yield
 
-    app = FastAPI(title="Trading News · Agent API", version="5.0.0", lifespan=lifespan,
-                  description="One asset report for 0.199 USDC via x402 v2 on Algorand. Use the existing /api/v1/market-signal/{symbol} URL. Headlines and excerpts retain their original language. Report days use UTC.")
+    app = FastAPI(title="Trading News · Agent API", version="5.1.0", lifespan=lifespan,
+                  description=f"One asset report for {cfg.price_usdc} USDC via x402 v2 on Algorand. Use /api/v1/market-signal/{{symbol}}. Includes a BUY/SELL/HOLD assessment of all report headlines and excerpts, with rationale in EN/ES/FR/DE. Report days use UTC.")
     app.state.settings = cfg
     rate = OrderedDict()
 
@@ -82,6 +82,11 @@ def create_app(settings=None, transport=None):
         return JSONResponse({"detail": "SOURCES_UNAVAILABLE", "providers": exc.states,
                              "billing": {"charged": False}}, status_code=503)
 
+    @app.exception_handler(AnalysisUnavailable)
+    async def analysis_unavailable(request, exc):
+        return JSONResponse({"detail": "ANALYSIS_UNAVAILABLE", "reason": exc.status,
+                             "billing": {"charged": False}}, status_code=503)
+
     def asset_for(symbol):
         try:
             return get_asset(symbol)
@@ -93,16 +98,16 @@ def create_app(settings=None, transport=None):
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "5.0.0", "payments_enabled": cfg.payments}
+        return {"status": "ok", "version": "5.1.0", "payments_enabled": cfg.payments}
 
     @app.get("/api/v1/config")
     async def config():
-        return {"payments_enabled": cfg.payments, "price_usdc": cfg.price_usdc,
+        return {"payments_enabled": cfg.payments, "price_usdc": cfg.price_usdc, "price_atomic": cfg.amount,
                 "network": cfg.network_name, "network_caip": cfg.network,
                 "asset_id": cfg.asset, "pay_to": cfg.pay_to, "api_url": cfg.public_url,
                 "report_path": "/api/v1/market-signal/{symbol}", "day_timezone": "UTC",
                 "providers": [{"name": p, "configured": bool(cfg.provider_keys.get(p))}
-                              for p in ("guardian", "newsapi", "gnews")], "ai_enabled": cfg.ai_enabled}
+                              for p in ("newsapi", "gnews")], "ai_enabled": cfg.ai_enabled}
 
     @app.get("/api/v1/assets")
     async def assets():
