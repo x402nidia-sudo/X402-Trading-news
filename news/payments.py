@@ -133,7 +133,10 @@ class PaymentGateway:
             "type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}}
         extensions["bazaar"]["info"].update({"name": "Trading News", "tags": ["x402-global-challenge", "news", "crypto"],
                                                "description": "Selected asset news with source links and provenance"})
-        return {"x402Version": 2, "resource": {"url": resource, "description": "Trading News · ranked asset news report",
+        description = "Trading News · ranked asset news report"
+        if "/api/web/v1/" not in resource:
+            description += " · RSS sources; an empty/unavailable result returns a labeled template without settlement"
+        return {"x402Version": 2, "resource": {"url": resource, "description": description,
                                                "mimeType": "application/json"},
                 "accepts": [requirement], "extensions": extensions}
 
@@ -216,7 +219,7 @@ class PaymentGateway:
             pass
         return result
 
-    async def access(self, token, resource, make_body):
+    async def access(self, token, resource, make_body, *, allow_template=False):
         cfg = self.settings
         if not cfg.payments:
             raise HTTPException(503, "PURCHASES_DISABLED")
@@ -265,6 +268,11 @@ class PaymentGateway:
         # Fetch before payment: failures and empty results must not trigger settlement.
         body = await make_body()
         if not body.get("best_article"):
+            if allow_template and body.get("is_template") is True and body.get("template"):
+                # Keep the existing no-charge policy for empty/unavailable reports.
+                # No journal claim, broadcast or facilitator settlement takes place.
+                return JSONResponse({**body, "billing": {"charged": False,
+                                     "reason": "NO_NEWS_NO_CHARGE", "payment_submitted": False}})
             raise HTTPException(503, "NO_TODAY_NEWS")
         if not self.store.claim(fingerprint, resource, body, proof):
             return self.existing(fingerprint, resource, proof)

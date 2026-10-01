@@ -15,15 +15,18 @@ class NoProviders(Exception):
 
 
 class NewsService:
-    def __init__(self, settings, store, providers, http):
+    def __init__(self, settings, store, providers, http, channel="web"):
         self.settings, self.store, self.providers, self.http = settings, store, providers, http
+        self.channel = channel
+        self.archive_prefix = "article:rss:" if channel == "api" else "article:v1:"
         self.locks = {s: asyncio.Lock() for s in ASSETS}
 
     async def snapshot(self, asset):
         symbol = asset["symbol"]
         config_signature = {"demo": self.settings.demo, "hours": self.settings.max_age_hours,
                             "language": self.settings.language, "asset": asset,
-                            "providers": sorted(k for k, v in self.settings.provider_keys.items() if v)}
+                            "providers": getattr(self.providers, "cache_identity", sorted(k for k, v in self.settings.provider_keys.items() if v)),
+                            "channel": self.channel}
         # Separate unsold reports from earlier AI caches; purchased receipts stay recoverable.
         key = symbol + ":v9:cards:" + hashlib.sha256(json.dumps(config_signature, sort_keys=True).encode()).hexdigest()[:20]
         async with self.locks[symbol]:
@@ -71,9 +74,9 @@ class NewsService:
             for article in latest:
                 article["insight"] = build_insight(article, asset)
                 public = {k: article[k] for k in ("id", "title", "summary", "url", "source", "published_at", "insight")}
-                self.store.cache("article:v1:" + symbol + ":" + article["id"], public)
+                self.store.cache(self.archive_prefix + symbol + ":" + article["id"], public)
             with self.store.connect() as db:
-                db.execute("DELETE FROM cache WHERE key LIKE 'article:v1:%' AND created<?", (time.time() - 30 * 86400,))
+                db.execute("DELETE FROM cache WHERE key LIKE ? AND created<?", (self.archive_prefix + "%", time.time() - 30 * 86400))
             snapshot = {"report": report, "latest": latest[:40]}
             self.store.cache(key, snapshot)
             return snapshot
@@ -95,7 +98,37 @@ class NewsService:
         return result
 
     async def report(self, asset, importance="all"):
-        return self.filter_report((await self.snapshot(asset))["report"], importance)
+        try:
+            report = self.filter_report((await self.snapshot(asset))["report"], importance)
+        except NoProviders as exc:
+            if self.channel != "api":
+                raise
+            now = datetime.now(timezone.utc)
+            report = {"schema_version": "2.4", "symbol": asset["symbol"], "name": asset["name"],
+                      "status": "sources_unavailable", "day_utc": now.date().isoformat(),
+                      "generated_at": now.isoformat(), "best_article": None, "articles": [],
+                      "providers": exc.states, "stats": {"unique": 0}, "warnings": [],
+                      "assessment": None, "recommendation": None, "billing": {"charged": False}}
+        if self.channel == "api":
+            report = deepcopy(report)
+            report.update(schema_version="2.4", channel="api", news_found=bool(report["articles"]),
+                          is_template=not bool(report["articles"]), importance=importance,
+                          language="source", template=None)
+            if not report["articles"]:
+                unavailable = report["status"] == "sources_unavailable"
+                partial = any(s["status"] != "ok" for s in report["providers"])
+                message = ("No se pudieron consultar las fuentes de noticias" if unavailable else
+                           "No se encontraron noticias en las fuentes consultadas")
+                message += f" para {asset['name']} ({asset['symbol']}) el {report['day_utc']} (UTC)."
+                if importance != "all":
+                    message += f" Filtro de importancia: {importance}."
+                if partial and not unavailable:
+                    message += " La cobertura es parcial porque alguna fuente no respondió."
+                report["template"] = {"is_template": True, "title": "Fuentes no disponibles" if unavailable else "Sin noticias",
+                                      "summary": message, "symbol": asset["symbol"], "date": report["day_utc"],
+                                      "reason": report["status"], "url": None, "published_at": None}
+                report["report_id"] = hashlib.sha256(json.dumps(report["template"], sort_keys=True).encode()).hexdigest()[:24]
+        return report
 
     async def history(self, asset=None, importance="all"):
         """Read public, archived stories; today's content is never returned here.
@@ -115,7 +148,7 @@ class NewsService:
         now = datetime.now(timezone.utc)
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff = now - timedelta(days=7)
-        pattern = "article:v1:" + (asset["symbol"] + ":%" if asset else "%")
+        pattern = self.archive_prefix + (asset["symbol"] + ":%" if asset else "%")
         with self.store.connect() as db:
             rows = db.execute("SELECT key,body FROM cache WHERE key LIKE ? AND created>=?",
                               (pattern, time.time() - 30 * 86400)).fetchall()

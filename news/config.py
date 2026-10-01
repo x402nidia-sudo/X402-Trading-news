@@ -49,6 +49,8 @@ class Settings:
     email_password: str = ""
     alert_interval_hours: float = 0.5
     web_url: str = "https://trading-news-web.onrender.com"
+    rss_feed_urls: tuple = ("https://www.coindesk.com/arc/outboundfeeds/rss/",)
+    rss_cache_seconds: int = 900
 
     @property
     def network(self):
@@ -63,6 +65,12 @@ class Settings:
         return atomic_usdc(self.price_usdc)
 
     def validate(self):
+        from .ranking import canonical_url
+        if not 1 <= len(self.rss_feed_urls) <= 10 or self.rss_cache_seconds < 60:
+            raise ValueError("Configure 1–10 RSS feeds and RSS_CACHE_SECONDS >=60")
+        for url in self.rss_feed_urls:
+            if not canonical_url(url) or urlsplit(url).scheme != "https":
+                raise ValueError("RSS_FEED_URLS must contain public HTTPS feed URLs")
         if self.network_name not in NETWORKS:
             raise ValueError("ALGORAND_NETWORK must be mainnet or testnet")
         self.price_usdc = format(Decimal(self.amount) / 1_000_000, "f")
@@ -118,6 +126,8 @@ class Settings:
             email_password=os.getenv("EMAIL_PASSWORD", "").replace(" ", "").strip(),
             alert_interval_hours=float(os.getenv("ALERT_INTERVAL_HOURS", "0.5")),
             web_url=os.getenv("WEB_BASE_URL", "https://trading-news-web.onrender.com").rstrip("/"),
+            rss_feed_urls=tuple(dict.fromkeys(u.strip() for u in os.getenv("RSS_FEED_URLS", "https://www.coindesk.com/arc/outboundfeeds/rss/").split(",") if u.strip())),
+            rss_cache_seconds=int(os.getenv("RSS_CACHE_SECONDS", "900")),
         )
         result.validate()
         return result
