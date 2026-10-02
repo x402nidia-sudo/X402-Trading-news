@@ -72,17 +72,18 @@ class RSSProviders:
                 return [], dict(state, status="cooldown")
             try:
                 target = url
-                for hop in range(3):
+                for hop in range(4):
                     async with self.http.stream("GET", target, timeout=12, follow_redirects=False,
                                                 headers={"Accept": "application/rss+xml, application/atom+xml, application/xml"}) as response:
-                        # Redirects are followed only within the same HTTPS host (e.g. a trailing-slash 308).
+                        # Redirects are followed only within the same host, always over HTTPS (e.g. a trailing-slash 308).
                         location = urlsplit(urljoin(target, response.headers.get("location", "")))
-                        if (hop < 2 and response.status_code in {301, 302, 307, 308}
-                                and (location.scheme, location.netloc) == ("https", urlsplit(url).netloc)):
-                            target = location.geturl()
+                        if hop < 3 and response.has_redirect_location and location.hostname == source:
+                            target = location._replace(scheme="https", netloc=source).geturl()
                             continue
                         if response.status_code != 200:
                             state.update(status="http_error", http_status=response.status_code)
+                            if response.has_redirect_location:
+                                state["location"] = location.geturl()
                             if response.status_code == 429:
                                 delay = retry_delay(response.headers.get("retry-after"))
                                 self.store.cooldown(key, delay)
