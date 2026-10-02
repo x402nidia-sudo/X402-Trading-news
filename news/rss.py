@@ -5,7 +5,7 @@ from datetime import timezone
 from email.utils import parsedate_to_datetime
 import hashlib
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree as ET
 import httpx
 from .providers import retry_delay
@@ -71,21 +71,30 @@ class RSSProviders:
             if self.store.cooldown(key):
                 return [], dict(state, status="cooldown")
             try:
-                async with self.http.stream("GET", url, timeout=12, follow_redirects=False,
-                                            headers={"Accept": "application/rss+xml, application/atom+xml, application/xml"}) as response:
-                    if response.status_code != 200:
-                        state.update(status="http_error", http_status=response.status_code)
-                        if response.status_code == 429:
-                            delay = retry_delay(response.headers.get("retry-after"))
-                            self.store.cooldown(key, delay)
-                            state.update(status="rate_limited", retry_after=delay)
-                        self.store.cache(key + ":failure", state)
-                        return [], state
-                    content = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        content.extend(chunk)
-                        if len(content) > MAX_BYTES:
-                            raise ValueError("Feed too large")
+                target = url
+                for hop in range(3):
+                    async with self.http.stream("GET", target, timeout=12, follow_redirects=False,
+                                                headers={"Accept": "application/rss+xml, application/atom+xml, application/xml"}) as response:
+                        # Redirects are followed only within the same HTTPS host (e.g. a trailing-slash 308).
+                        location = urlsplit(urljoin(target, response.headers.get("location", "")))
+                        if (hop < 2 and response.status_code in {301, 302, 307, 308}
+                                and (location.scheme, location.netloc) == ("https", urlsplit(url).netloc)):
+                            target = location.geturl()
+                            continue
+                        if response.status_code != 200:
+                            state.update(status="http_error", http_status=response.status_code)
+                            if response.status_code == 429:
+                                delay = retry_delay(response.headers.get("retry-after"))
+                                self.store.cooldown(key, delay)
+                                state.update(status="rate_limited", retry_after=delay)
+                            self.store.cache(key + ":failure", state)
+                            return [], state
+                        content = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            content.extend(chunk)
+                            if len(content) > MAX_BYTES:
+                                raise ValueError("Feed too large")
+                    break
                 items = parse_feed(bytes(content), source)
                 state["count"] = len(items)
                 self.store.cache(key, {"items": items, "state": state})

@@ -97,7 +97,21 @@ class NewsService:
         result["report_id"] = hashlib.sha256((report["report_id"] + ":" + importance).encode()).hexdigest()[:24]
         return result
 
-    async def report(self, asset, importance="all"):
+    def latest_stored(self, symbol, importance="all"):
+        """Most recent archived story for the asset (kept 30 days), whatever its day."""
+        with self.store.connect() as db:
+            rows = db.execute("SELECT body FROM cache WHERE key LIKE ?", (self.archive_prefix + symbol + ":%",)).fetchall()
+        stories = []
+        for row in rows:
+            try:
+                article = json.loads(row["body"])
+                if importance in {"all", article["insight"]["importance"]["level"]}:
+                    stories.append((parse_date(article["published_at"]).timestamp(), article["id"], article))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue
+        return max(stories, key=lambda s: s[:2])[2] if stories else None
+
+    async def report(self, asset, importance="all", latest=False):
         try:
             report = self.filter_report((await self.snapshot(asset))["report"], importance)
         except NoProviders as exc:
@@ -109,6 +123,13 @@ class NewsService:
                       "generated_at": now.isoformat(), "best_article": None, "articles": [],
                       "providers": exc.states, "stats": {"unique": 0}, "warnings": [],
                       "assessment": None, "recommendation": None, "billing": {"charged": False}}
+        story = self.latest_stored(asset["symbol"], importance) if latest and not report["articles"] else None
+        if story:
+            # Nothing today (or sources down): return the most recent stored story, labelled as such.
+            report = {**report, "status": "latest_available", "best_article": story, "articles": [story],
+                      "stats": {**report["stats"], "unique": 1},
+                      "warnings": report["warnings"] + [f"No story for {asset['symbol']} today (UTC); this is the most recent stored one."],
+                      "report_id": hashlib.sha256(":".join((asset["symbol"], "latest", importance, story["id"])).encode()).hexdigest()[:24]}
         if self.channel == "api":
             report = deepcopy(report)
             report.update(schema_version="2.4", channel="api", news_found=bool(report["articles"]),
