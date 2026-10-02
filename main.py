@@ -254,7 +254,7 @@ def create_app(settings=None, transport=None):
         if request.headers.get("origin") and request.headers["origin"] not in origins:
             raise HTTPException(403, "ORIGIN_NOT_ALLOWED")
         # Check that useful, current content is available before asking for a signature.
-        report = await service_for(request).report(a, importance)
+        report = await service_for(request).report(a, importance, latest=channel_for(request) == "api")
         if not report.get("best_article"):
             if channel_for(request) == "api" and report.get("is_template"):
                 return {**report, "billing": {"charged": False, "reason": "NO_NEWS_NO_CHARGE", "payment_submitted": False}}
@@ -284,7 +284,7 @@ def create_app(settings=None, transport=None):
         token = request.headers.get("payment-signature") or request.headers.get("x-payment")
         channel = channel_for(request)
         return await app.state.payments.access(token, resource(a["symbol"], importance, channel),
-                                              lambda: service_for(request).report(a, importance),
+                                              lambda: service_for(request).report(a, importance, latest=channel == "api"),
                                               allow_template=(channel == "api"))
 
     @app.get("/.well-known/x402.json")
