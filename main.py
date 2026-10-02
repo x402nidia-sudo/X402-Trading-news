@@ -69,7 +69,7 @@ def create_app(settings=None, transport=None):
     async def lifespan(app):
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, timeout=15,
                                      limits=httpx.Limits(max_connections=12),
-                                     headers={"User-Agent": "TradingNews/5.8.0"}) as http:
+                                     headers={"User-Agent": "TradingNews/5.8.1"}) as http:
             store = Store(cfg.db_path)
             app.state.store = store
             app.state.news = NewsService(cfg, store, RSSProviders(cfg, store, http), http, channel="api")
@@ -90,7 +90,7 @@ def create_app(settings=None, transport=None):
                         with suppress(asyncio.CancelledError):
                             await worker
 
-    app = FastAPI(title="Trading News", version="5.8.0", lifespan=lifespan, docs_url=None,
+    app = FastAPI(title="Trading News", version="5.8.1", lifespan=lifespan, docs_url=None,
                   description=f"One asset report for {cfg.price_usdc} USDC via x402 v2 on Algorand. Use /api/v1/market-signal/{{symbol}}. Today's news ordered by explainable rules: asset relevance, recency, source priority, event and coverage. Includes scores, source links and dates. Includes indicative per-story BUY/SELL/HOLD impact signals based on explicit rules, without OpenAI. Free history excludes today. Report days use UTC.")
     app.state.settings = cfg
     rate = OrderedDict()
@@ -153,7 +153,7 @@ def create_app(settings=None, transport=None):
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "5.8.0", "payments_enabled": cfg.payments}
+        return {"status": "ok", "version": "5.8.1", "payments_enabled": cfg.payments}
 
     @app.get("/api/v1/config")
     async def config():

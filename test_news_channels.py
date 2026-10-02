@@ -15,6 +15,7 @@ from news.catalog import ASSETS
 from news.config import Settings
 from news.payments import PaymentGateway
 from news.providers import Providers
+from news.ranking import parse_date
 from news.rss import RSSProviders, parse_feed
 from news.service import NewsService
 from news.storage import Store
@@ -92,6 +93,40 @@ class Sources(unittest.IsolatedAsyncioTestCase):
         atom = b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Bitcoin</title><link href="https://example.com/a"/><published>2026-10-01T00:00:00Z</published></entry></feed>'
         self.assertEqual(parse_feed(atom, "source")[0]["url"], "https://example.com/a")
 
+    async def test_same_host_redirect_is_followed_other_host_is_not(self):
+        for location, expected, requests in (("/arc/outboundfeeds/rss", "ok", 2),
+                                             ("http://www.coindesk.com/arc/outboundfeeds/rss", "ok", 2),
+                                             ("https://example.com/feed", "http_error", 1)):
+            calls = []
+            def handle(req):
+                calls.append(str(req.url))
+                if req.url.path.endswith("/"):
+                    return httpx.Response(308, headers={"Location": location})
+                return httpx.Response(200, content=feed())
+            with tempfile.TemporaryDirectory() as tmp:
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+                    items, state = await RSSProviders(self.cfg, Store(tmp + "/db"), http).fetch(self.cfg.rss_feed_urls[0])
+            self.assertEqual((state["status"], len(items), len(calls)), (expected, int(expected == "ok"), requests))
+            self.assertTrue(all(call.startswith("https://www.coindesk.com/") for call in calls))
+            self.assertEqual(state.get("location"), None if expected == "ok" else location)
+
+    async def test_latest_returns_most_recent_stored_story(self):
+        old = datetime.now(timezone.utc) - timedelta(days=1)
+        self.content = feed(date=old)
+        self.assertTrue((await self.api.report(ASSETS["BTC"]))["is_template"])  # alerts/preview unchanged
+        report = await self.api.report(ASSETS["BTC"], latest=True)
+        self.assertEqual((report["status"], report["is_template"], report["news_found"]), ("latest_available", False, True))
+        self.assertEqual(parse_date(report["best_article"]["published_at"]).date(), old.date())
+        self.assertTrue((await self.api.report(ASSETS["BTC"], "low", latest=True))["is_template"])
+        self.assertTrue((await self.api.report(ASSETS["ETH"], latest=True))["is_template"])
+        # Feed down later: the stored story is still served.
+        with self.store.connect() as db:
+            db.execute("DELETE FROM cache WHERE key NOT LIKE 'article:%'")
+        self.status = 503
+        report = await self.api.report(ASSETS["BTC"], latest=True)
+        self.assertEqual(report["best_article"]["title"], "Bitcoin ETF approval")
+        self.assertTrue(report["report_id"])
+
     async def test_payment_template_never_settles_and_paid_replays(self):
         self.cfg.payments = True
         requirement = {"amount": "200000"}
@@ -162,6 +197,42 @@ class Routes(unittest.TestCase):
                 self.assertEqual(r.status_code, 503)
                 self.assertIs(app.state.alerts.news, app.state.news)
                 self.assertEqual(client.get("/api/v1/market-signal/INVALID").status_code, 404)
+
+
+    def test_paid_api_route_charges_latest_story_web_does_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Settings(db_path=tmp + "/db", payments=True,
+                           pay_to="DIPQL34NWQTXO6ZNLNYOYILJZ7UBLMY5KMTJSOCISGYDSPV2PR6VS6UP2Q",
+                           provider_keys={"newsapi": "test", "gnews": "test"})
+            txid, calls = "A" * 52, []
+            def handler(req):
+                calls.append(req.url.path)
+                if req.url.host == "www.coindesk.com":
+                    return httpx.Response(200, content=feed(date=datetime.now(timezone.utc) - timedelta(days=1)))
+                if req.url.host in {"newsapi.org", "gnews.io"}:
+                    return httpx.Response(200, json={"status": "ok", "articles": []})
+                if req.url.path == "/verify":
+                    return httpx.Response(200, json={"isValid": True})
+                if req.url.path == "/settle":
+                    return httpx.Response(200, json={"success": True, "network": cfg.network, "transaction": txid})
+                raise AssertionError(req.url)
+            with patch.dict("os.environ", {"RENDER": ""}), TestClient(create_app(cfg, httpx.MockTransport(handler))) as client:
+                app = client.app
+                app.state.payments.requirement = AsyncMock(return_value={})
+                app.state.payments.challenge = Mock(return_value={"extensions": {}})
+                app.state.checkout.prepare = AsyncMock(return_value={"prepared": True})
+                for prefix, fingerprint in (("/api/v1", "api"), ("/api/web/v1", "web")):
+                    url = cfg.public_url + prefix + "/market-signal/BTC"
+                    payload = {"accepted": {}, "resource": {"url": url}}
+                    with patch("news.payments.decode_payment", return_value=(payload, fingerprint, "proof")), patch("news.payments.validate_transfer", return_value=(Mock(), [txid])):
+                        r = client.get(prefix + "/market-signal/BTC", headers={"PAYMENT-SIGNATURE": "test"})
+                    if prefix == "/api/v1":
+                        self.assertEqual((r.status_code, r.json()["billing"]["charged"], r.json()["status"]), (200, True, "latest_available"))
+                    else:
+                        self.assertEqual((r.status_code, r.json()["detail"]), (503, "NO_TODAY_NEWS"))
+                self.assertEqual(calls.count("/settle"), 1)
+                self.assertTrue(client.get("/api/v1/news/BTC").json()["is_template"])  # free preview never shows it
+                self.assertEqual(client.post("/api/v1/checkout/BTC", json={"address": cfg.pay_to}).json(), {"prepared": True})
 
 
 if __name__ == "__main__":
