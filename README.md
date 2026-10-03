@@ -1,5 +1,8 @@
 # Trading News — Backend
 
+- Website: https://www.breaking-trading-new.es/
+- API (x402 endpoints): https://x402-trading-news.onrender.com
+
 Explainable crypto news reports for people and software agents, purchased with USDC on Algorand through x402 v2.
 
 The API covers 49 assets. It retrieves news from NewsAPI and GNews, removes duplicate coverage, ranks relevant stories, and explains the selection. Each story includes its source, publication date, importance and an indicative BUY / SELL / HOLD interpretation. The engine uses deterministic rules and makes no OpenAI requests.
