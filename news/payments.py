@@ -19,9 +19,21 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 import httpx
 from x402.schemas import PaymentPayload, PaymentRequirements
-from x402.extensions.bazaar import declare_discovery_extension
+from x402.extensions.bazaar import declare_discovery_extension, OutputConfig
 
 LOG = logging.getLogger("tradingnews.payments")
+
+
+def output_example(symbol):
+    """Abridged example of the paid report shown in the Bazaar listing (real keys, sample values)."""
+    return {"schema_version": "2.4", "symbol": symbol, "status": "ok", "day_utc": "2026-10-03",
+            "channel": "api", "news_found": True, "importance": "all",
+            "best_article": {"id": "3f2a9c1e7b4d5a6f8e0b", "title": f"Example headline about {symbol}",
+                             "url": "https://example.com/news/article", "source": "Example News",
+                             "published_at": "2026-10-03T08:15:00+00:00", "score": 7.4,
+                             "insight": {"importance": {"level": "medium"},
+                                         "recommendation": {"signal": "HOLD", "reason": "insufficient"}}},
+            "stats": {"unique": 1}, "billing": {"charged": True, "replayed": False}}
 
 
 def encoded(data):
@@ -124,7 +136,9 @@ class PaymentGateway:
                                    extra=extra).model_dump(by_alias=True)
 
     def challenge(self, requirement, resource):
-        extensions = declare_discovery_extension(input={}, input_schema={"type": "object", "properties": {}})
+        symbol = resource.split("/market-signal/")[-1].split("?")[0]
+        extensions = declare_discovery_extension(input={}, input_schema={"type": "object", "properties": {}},
+                                                 output=OutputConfig(example=output_example(symbol)))
         extensions["bazaar"]["info"]["input"]["method"] = "GET"
         schema_input = extensions["bazaar"]["schema"]["properties"]["input"]
         schema_input["properties"]["method"] = {"type": "string", "enum": ["GET"]}
