@@ -185,6 +185,11 @@ def create_app(settings=None, transport=None):
                 return {**report, "has_today_news": False, "latest_window_days": 7}
         return await service.preview(asset, importance)
 
+    @app.get("/api/web/v1/news-today")
+    async def news_today():
+        """Free website check: which assets have relevant news today (UTC). Symbols only."""
+        return await app.state.web_news.today()
+
     @app.get("/api/v1/history")
     @app.get("/api/web/v1/history")
     async def history(request: Request, symbol: str = "ALL", importance: Literal["all", "high", "medium", "low"] = "all"):
