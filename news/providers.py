@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import time
 import httpx
-from .catalog import query_for
+from .catalog import query_for, grouped_queries
 from .ranking import NON_NEWS_DOMAINS
 
 
@@ -23,7 +23,7 @@ class Providers:
         self.locks = {p: asyncio.Lock() for p in ("newsapi", "gnews")}
         self.last_request = {p: 0. for p in self.locks}
 
-    async def fetch(self, provider, asset):
+    async def fetch(self, provider, query, page_size=30):
         key = self.settings.provider_keys.get(provider)
         if not key:
             return [], {"provider": provider, "status": "not_configured", "count": 0}
@@ -36,11 +36,10 @@ class Providers:
             await asyncio.sleep(max(0, 1.1 - (time.monotonic() - self.last_request[provider])))
             self.last_request[provider] = time.monotonic()
             start = datetime.now(timezone.utc) - timedelta(hours=168)
-            query = query_for(asset)
             params, headers = {}, {}
             if provider == "newsapi":
                 url = "https://newsapi.org/v2/everything"
-                params = {"q": query, "pageSize": 30, "sortBy": "publishedAt", "from": start.isoformat(),
+                params = {"q": query, "pageSize": page_size, "sortBy": "publishedAt", "from": start.isoformat(),
                           "excludeDomains": ",".join(sorted(NON_NEWS_DOMAINS)), "searchIn": "title,description"}
                 headers = {"X-Api-Key": key}
             else:
@@ -76,5 +75,11 @@ class Providers:
                 return [], dict(status, status="invalid_response")
 
     async def all(self, asset):
-        results = await asyncio.gather(*(self.fetch(p, asset) for p in self.locks))
+        results = await asyncio.gather(*(self.fetch(p, query_for(asset)) for p in self.locks))
+        return [a for articles, _ in results for a in articles], [state for _, state in results]
+
+    async def grouped(self):
+        """The whole catalog in a few requests per provider (query limits: NewsAPI 500 characters, GNews 200)."""
+        results = await asyncio.gather(*(self.fetch(p, q, 100) for p, limit in (("newsapi", 500), ("gnews", 200))
+                                         for q in grouped_queries(limit)))
         return [a for articles, _ in results for a in articles], [state for _, state in results]

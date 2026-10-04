@@ -16,3 +16,22 @@ def query_for(asset):
     if asset.get("ambiguous"):
         return f"({terms}) AND (crypto OR blockchain OR token)"
     return terms
+
+
+def grouped_queries(limit):
+    """A few OR queries covering every asset's search terms within a provider's query-length limit."""
+    queries = []
+    for ambiguous, head, tail in ((False, "", ""), (True, "(", ") AND (crypto OR blockchain OR token)")):
+        terms = []
+        for asset in ASSETS.values():
+            if bool(asset.get("ambiguous")) != ambiguous:
+                continue
+            for alias in asset["aliases"][:3]:
+                term = '"' + alias + '"'
+                if terms and len(head + " OR ".join(terms + [term]) + tail) > limit:
+                    queries.append(head + " OR ".join(terms) + tail)
+                    terms = []
+                terms.append(term)
+        if terms:
+            queries.append(head + " OR ".join(terms) + tail)
+    return queries

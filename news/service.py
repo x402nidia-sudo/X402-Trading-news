@@ -5,13 +5,27 @@ import hashlib
 import json
 import time
 from .catalog import ASSETS
-from .ranking import rank_articles, parse_date
+from .ranking import rank_articles, parse_date, canonical_url
 from .insights import build_insight
+
+
+TODAY_SCAN_SECONDS = 4 * 3600  # A grouped scan costs a few requests per provider.
 
 
 class NoProviders(Exception):
     def __init__(self, states):
         self.states = states
+
+
+def merge_raw(known, new):
+    seen = {canonical_url(a.get("url")) for a in known}
+    return known + [a for a in new if canonical_url(a.get("url")) not in seen]
+
+
+def relevant_raw(raw, ranked):
+    """Provider items behind the ranked stories, duplicates included."""
+    urls = {c["url"] for a in ranked for c in a["coverage"]}
+    return [a for a in raw if canonical_url(a.get("url")) in urls]
 
 
 class NewsService:
@@ -20,15 +34,19 @@ class NewsService:
         self.channel = channel
         self.archive_prefix = "article:rss:" if channel == "api" else "article:v1:"
         self.locks = {s: asyncio.Lock() for s in ASSETS}
+        self.today_lock = asyncio.Lock()
 
-    async def snapshot(self, asset):
-        symbol = asset["symbol"]
+    def snapshot_key(self, asset):
         config_signature = {"demo": self.settings.demo, "hours": self.settings.max_age_hours,
                             "language": self.settings.language, "asset": asset,
                             "providers": getattr(self.providers, "cache_identity", sorted(k for k, v in self.settings.provider_keys.items() if v)),
                             "channel": self.channel}
         # Separate unsold reports from earlier AI caches; purchased receipts stay recoverable.
-        key = symbol + ":v9:cards:" + hashlib.sha256(json.dumps(config_signature, sort_keys=True).encode()).hexdigest()[:20]
+        return asset["symbol"] + ":v9:cards:" + hashlib.sha256(json.dumps(config_signature, sort_keys=True).encode()).hexdigest()[:20]
+
+    async def snapshot(self, asset):
+        symbol = asset["symbol"]
+        key = self.snapshot_key(asset)
         async with self.locks[symbol]:
             cached = self.store.cached(key, self.settings.cache_seconds)
             now = datetime.now(timezone.utc)
@@ -44,7 +62,14 @@ class NewsService:
             if not any(s["status"] == "ok" for s in states):
                 self.store.cache(key + ":failure", states)
                 raise NoProviders(states)
+            if self.channel == "web":
+                # Stories already found for this asset today (UTC) stay in its report, so the
+                # landing list of assets with news always agrees with the asset's own check.
+                today_key = "today:web:" + now.date().isoformat() + ":" + symbol
+                raw = merge_raw(raw, self.store.cached(today_key, 86400) or [])
             articles, stats = rank_articles(raw, asset, self.settings.max_age_hours)
+            if articles and self.channel == "web":
+                self.store.cache(today_key, relevant_raw(raw, articles))
             for article in articles:
                 article["insight"] = build_insight(article, asset)
             best = articles[0] if articles else None
@@ -203,6 +228,41 @@ class NewsService:
                 "partial_sources": partial, "scope": "collected_archive",
                 "has_more": len(articles) > 200, "limit": 200,
                 "articles": [a for _, a in articles[:200]]}
+
+    async def today(self):
+        """Assets with relevant news today (UTC), found with a few grouped provider queries."""
+        now = datetime.now(timezone.utc)
+        prefix = "today:web:" + now.date().isoformat() + ":"
+        async with self.today_lock:
+            scan = self.store.cached(prefix + "scan", TODAY_SCAN_SECONDS)
+            if not scan:
+                failure = self.store.cached(prefix + "failure", 300)
+                if failure:
+                    raise NoProviders(failure)
+                raw, states = await self.providers.grouped()
+                if not any(s["status"] == "ok" for s in states):
+                    self.store.cache(prefix + "failure", states)
+                    raise NoProviders(states)
+                for symbol, asset in ASSETS.items():
+                    known = self.store.cached(prefix + symbol, 86400) or []
+                    found = merge_raw(known, relevant_raw(raw, rank_articles(raw, asset, self.settings.max_age_hours, now)[0]))
+                    if len(found) > len(known):
+                        self.store.cache(prefix + symbol, found)
+                        # The asset's cached check predates these stories; let it be rebuilt with them.
+                        with self.store.connect() as db:
+                            db.execute("DELETE FROM cache WHERE key=?", (self.snapshot_key(asset),))
+                scan = {"checked_at": now.isoformat(),
+                        "partial_sources": any(s["status"] not in {"ok", "not_configured"} for s in states)}
+                self.store.cache(prefix + "scan", scan)
+                with self.store.connect() as db:
+                    db.execute("DELETE FROM cache WHERE key LIKE 'today:web:%' AND created<?", (time.time() - 2 * 86400,))
+        with self.store.connect() as db:
+            rows = db.execute("SELECT key,body FROM cache WHERE key LIKE ?", (prefix + "%",)).fetchall()
+        stored = {row["key"][len(prefix):]: json.loads(row["body"]) for row in rows}
+        # Symbols only: no headline, source or signal is exposed here.
+        return {"symbols": [s for s, a in ASSETS.items()
+                            if s in stored and rank_articles(stored[s], a, self.settings.max_age_hours, now)[0]],
+                "day_utc": now.date().isoformat(), **scan}
 
     async def preview(self, asset, importance="all"):
         snapshot = await self.snapshot(asset)
